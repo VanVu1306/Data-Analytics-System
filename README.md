@@ -1,4 +1,4 @@
-# NL2Viz — kiến trúc Agentic (backend / frontend tách riêng)
+# Data-Analytics-System — kiến trúc Agentic (backend / frontend tách riêng)
 
 **Natural Language → SQL → DataFrame → Biểu đồ.** Bản này là bản **refactor cấu trúc** của NL2Viz: chức năng giữ nguyên, nhưng code được tách thành các lớp rõ ràng (config, LLM, prompts, database, tools, agents, pipeline, API) và frontend chạy tách khỏi backend.
 
@@ -158,7 +158,7 @@ Dùng model Ollama tùy chỉnh: `ollama create llama3-fast -f scripts/Modelfile
 Yêu cầu Python 3.10+ (đã chạy thử trên 3.13).
 
 ```bash
-cd NL2Viz
+cd Data-Analytics-System
 python -m venv venv && source venv/bin/activate      # Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
