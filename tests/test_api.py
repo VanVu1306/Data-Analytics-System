@@ -31,6 +31,7 @@ def test_health_and_schema_and_models(client_for):
         "deepseek_configured": False,
         "ollama_running": True,
         "ollama_default_model": "llama3.2",
+        "max_upload_mb": 50,
     }
     assert "orders" in client.get("/api/schema").json()["tables"]
     assert client.get("/api/models").json() == {"models": ["llama3.2", "llama3.2:1b"], "default": "llama3.2"}

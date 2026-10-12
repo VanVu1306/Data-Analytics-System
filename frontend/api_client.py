@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import requests
 
-from frontend.config import API_BASE_URL, HEALTH_TIMEOUT, QUERY_TIMEOUT
+from frontend.config import API_BASE_URL, HEALTH_TIMEOUT, QUERY_TIMEOUT, UPLOAD_TIMEOUT
 
 
 class APIError(RuntimeError):
@@ -21,10 +21,17 @@ class APIError(RuntimeError):
 
 @dataclass
 class Health:
+    max_upload_mb: int
     db_exists: bool
     deepseek_configured: bool
     ollama_running: bool
     ollama_default_model: str
+
+
+@dataclass
+class Schema:
+    tables: Dict[str, List[str]]
+    relations: List[Dict[str, Any]]
 
 
 @dataclass
@@ -42,6 +49,8 @@ class QueryResult:
     viz_source: Optional[str]
     viz_error: Optional[str]
     chart_png: Optional[bytes]
+    clarification: Optional[str] = None
+    truncated: bool = False
 
 
 class NL2VizClient:
@@ -65,6 +74,10 @@ class NL2VizClient:
                 detail = r.json().get("detail", r.text)
             except ValueError:
                 detail = r.text
+            if isinstance(detail, dict):  # {"code", "message"} từ lỗi nghiệp vụ dataset
+                detail = detail.get("message", detail)
+            elif isinstance(detail, list):  # lỗi validate 422 của FastAPI
+                detail = "; ".join(str(d.get("msg", d)) for d in detail)
             raise APIError(f"{detail}")
         return r.json()
 
@@ -72,14 +85,31 @@ class NL2VizClient:
     def health(self) -> Health:
         d = self._request("GET", "/api/health", HEALTH_TIMEOUT)
         return Health(
+            max_upload_mb=d.get("max_upload_mb", 50),
             db_exists=d["db_exists"],
             deepseek_configured=d["deepseek_configured"],
             ollama_running=d["ollama_running"],
             ollama_default_model=d["ollama_default_model"],
         )
 
-    def schema(self) -> Dict[str, List[str]]:
-        return self._request("GET", "/api/schema", HEALTH_TIMEOUT)["tables"]
+    def schema(self, dataset_id: Optional[str] = None) -> Schema:
+        params = {"dataset_id": dataset_id} if dataset_id else None
+        d = self._request("GET", "/api/schema", HEALTH_TIMEOUT, params=params)
+        return Schema(tables=d["tables"], relations=d.get("relations", []))
+
+    # ── dataset upload ─────────────────────────────────────────────────────
+    def upload_dataset(self, filename: str, content: bytes) -> Dict[str, Any]:
+        files = {"file": (filename, content, "application/octet-stream")}
+        return self._request("POST", "/api/datasets", UPLOAD_TIMEOUT, files=files)
+
+    def get_dataset(self, dataset_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/api/datasets/{dataset_id}", HEALTH_TIMEOUT)
+
+    def add_relation(self, dataset_id: str, relation: Dict[str, str]) -> Dict[str, Any]:
+        return self._request("POST", f"/api/datasets/{dataset_id}/relations", HEALTH_TIMEOUT, json=relation)
+
+    def remove_relation(self, dataset_id: str, relation: Dict[str, str]) -> Dict[str, Any]:
+        return self._request("DELETE", f"/api/datasets/{dataset_id}/relations", HEALTH_TIMEOUT, json=relation)
 
     def models(self) -> List[str]:
         return self._request("GET", "/api/models", HEALTH_TIMEOUT)["models"]
@@ -93,9 +123,11 @@ class NL2VizClient:
         use_ollama: bool = True,
         use_mock_viz: bool = False,
         ollama_model: Optional[str] = None,
+        dataset_id: Optional[str] = None,
     ) -> QueryResult:
         payload = {
             "question": question,
+            "dataset_id": dataset_id,
             "chart_hint": chart_hint,
             "use_mock_sql": use_mock_sql,
             "use_ollama": use_ollama,
@@ -123,4 +155,6 @@ class NL2VizClient:
             viz_source=d.get("viz_source"),
             viz_error=d.get("viz_error"),
             chart_png=png,
+            clarification=d.get("clarification"),
+            truncated=d.get("truncated", False),
         )

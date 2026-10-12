@@ -21,12 +21,13 @@ def render_header() -> None:
         "Pipeline: Câu hỏi → **DAIL-SQL** (DeepSeek) → SQL → DataFrame → "
         "**Text-to-Python** (Ollama Llama3 local) → Biểu đồ"
     )
+    st.caption("Upload CSV / Excel / SQLite của bạn, chọn dataset ở sidebar rồi đặt câu hỏi bằng ngôn ngữ tự nhiên.")
 
 
-def render_question_form() -> Tuple[bool, str, str]:
+def render_question_form(default_question: str = DEFAULT_QUESTION) -> Tuple[bool, str, str]:
     """Trả về (run_btn, question, chart_hint)."""
     # Giá trị mặc định đặt qua session_state (sidebar cũng ghi vào key này khi bấm gợi ý)
-    st.session_state.setdefault("question_input", DEFAULT_QUESTION)
+    st.session_state.setdefault("question_input", default_question)
     question = st.text_input(
         "Nhập câu hỏi của bạn:",
         placeholder="Ví dụ: What is the revenue by region?",
@@ -60,16 +61,26 @@ def render_results(result: QueryResult, state: SidebarState) -> None:
     # ═══ STAGE 2: Execute SQL → DataFrame ═══
     step_label("Stage 2 · Thực thi SQL → DataFrame")
 
+    if result.status == "needs_clarification":
+        st.info(
+            f"🤔 Cần làm rõ trước khi truy vấn: {result.clarification}\n\n"
+            "Hãy diễn đạt lại câu hỏi, hoặc khai báo quan hệ giữa các bảng ở mục **🔗 Quan hệ giữa các bảng** "
+            "trong sidebar rồi chạy lại."
+        )
+        return
+
     if result.status == "sql_error":
         st.error(f"❌ Lỗi SQL: {result.sql_error}")
-        st.stop()
+        return
 
     if result.status == "empty_result" or result.df is None or result.df.empty:
         st.warning("⚠️ Query thành công nhưng không có dữ liệu trả về.")
-        st.stop()
+        return
 
     df = result.df
     st.success(f"✅ Trả về {len(df)} dòng × {len(df.columns)} cột")
+    if result.truncated:
+        st.warning("⚠️ Kết quả quá lớn nên đã bị cắt bớt theo giới hạn của hệ thống. Hãy thu hẹp câu hỏi (lọc/gộp/LIMIT).")
     st.dataframe(df, width="stretch", height=200)
 
     # ═══ STAGE 3: Text-to-Python → Chart ═══
@@ -108,7 +119,7 @@ def render_results(result: QueryResult, state: SidebarState) -> None:
 
 
 def render_intro() -> None:
-    st.info("👈 Nhập câu hỏi hoặc chọn gợi ý từ sidebar, rồi nhấn **Chạy Pipeline**.")
+    st.info("👈 Upload dữ liệu (hoặc dùng demo), nhập câu hỏi hoặc chọn gợi ý từ sidebar, rồi nhấn **Chạy Pipeline**.")
 
     with st.expander("📖 Architecture overview"):
         st.markdown("""

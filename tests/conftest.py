@@ -60,9 +60,11 @@ def demo_db(tmp_path_factory) -> str:
 
 
 @pytest.fixture
-def settings(demo_db):
-    # deepseek_api_key rỗng để test không phụ thuộc biến môi trường của máy
-    return dataclasses.replace(load_settings(), db_path=demo_db, deepseek_api_key="")
+def settings(demo_db, tmp_path):
+    # deepseek_api_key rỗng để test không phụ thuộc biến môi trường của máy; dataset_dir nằm trong thư mục tạm
+    return dataclasses.replace(
+        load_settings(), db_path=demo_db, deepseek_api_key="", dataset_dir=str(tmp_path / "datasets")
+    )
 
 
 @pytest.fixture

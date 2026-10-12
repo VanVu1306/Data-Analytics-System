@@ -17,47 +17,47 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ### Frontend
 
-- [ ] Thêm nút/khu vực upload dữ liệu trong giao diện Streamlit, dùng bộ chọn tệp và hiển thị tên tệp, định dạng, tiến độ/trạng thái.
-- [ ] Cho phép người dùng upload CSV, Excel (`.xlsx`) và SQLite (`.db`/`.sqlite`).
-- [ ] Sau khi upload thành công, hiển thị thông báo, `dataset_id`, các bảng đã import và số dòng; cho phép chọn dataset vừa upload làm dataset đang phân tích.
-- [ ] Hiển thị lỗi định dạng/import rõ ràng và giữ lại giao diện để người dùng có thể thử lại.
+- [X] Thêm nút/khu vực upload dữ liệu trong giao diện Streamlit, dùng bộ chọn tệp và hiển thị tên tệp, định dạng, tiến độ/trạng thái.
+- [X] Cho phép người dùng upload CSV, Excel (`.xlsx`) và SQLite (`.db`/`.sqlite`).
+- [X] Sau khi upload thành công, hiển thị thông báo, `dataset_id`, các bảng đã import và số dòng; cho phép chọn dataset vừa upload làm dataset đang phân tích.
+- [X] Hiển thị lỗi định dạng/import rõ ràng và giữ lại giao diện để người dùng có thể thử lại.
 
 ### Backend
 
-- [ ] Thêm API nhận upload qua multipart/form-data, ví dụ `POST /api/datasets`.
-- [ ] Kiểm tra phần mở rộng và nội dung tệp, kích thước, tệp rỗng/hỏng và cấu trúc trước khi import.
-- [ ] Chuẩn hóa dữ liệu về một SQLite database riêng cho mỗi upload:
+- [X] Thêm API nhận upload qua multipart/form-data, ví dụ `POST /api/datasets`.
+- [X] Kiểm tra phần mở rộng và nội dung tệp, kích thước, tệp rỗng/hỏng và cấu trúc trước khi import.
+- [X] Chuẩn hóa dữ liệu về một SQLite database riêng cho mỗi upload:
 
-  - [ ] CSV: một tệp thành một bảng.
-  - [ ] Excel: mỗi sheet thành một bảng trong cùng database.
-  - [ ] SQLite: kiểm tra database hợp lệ và sao chép/import vào vùng lưu trữ do backend quản lý.
-- [ ] Chuẩn hóa tên bảng/cột và kiểu dữ liệu; xử lý tên trùng, ô rỗng, giá trị không đồng nhất và tên sheet không hợp lệ một cách nhất quán.
-- [ ] Lưu metadata gắn `dataset_id` với đường dẫn SQLite do server tạo, tên nguồn, định dạng, thời điểm upload và trạng thái import.
-- [ ] Trả `dataset_id`, schema/tên bảng, số dòng và thông tin lỗi/cảnh báo import về frontend.
-- [ ] Thêm giới hạn kích thước upload và dọn tệp tạm khi import thất bại.
+  - [X] CSV: một tệp thành một bảng.
+  - [X] Excel: mỗi sheet thành một bảng trong cùng database.
+  - [X] SQLite: kiểm tra database hợp lệ và sao chép/import vào vùng lưu trữ do backend quản lý.
+- [X] Chuẩn hóa tên bảng/cột và kiểu dữ liệu; xử lý tên trùng, ô rỗng, giá trị không đồng nhất và tên sheet không hợp lệ một cách nhất quán.
+- [X] Lưu metadata gắn `dataset_id` với đường dẫn SQLite do server tạo, tên nguồn, định dạng, thời điểm upload và trạng thái import.
+- [X] Trả `dataset_id`, schema/tên bảng, số dòng và thông tin lỗi/cảnh báo import về frontend.
+- [X] Thêm giới hạn kích thước upload và dọn tệp tạm khi import thất bại.
 
 ### Nối vào backend hiện tại để chạy được
 
-- [ ] Thay giả định database cố định trong `backend/container.py` bằng khả năng tạo/chọn repository theo `dataset_id`.
-- [ ] Thêm registry/store dataset phía backend để tra `dataset_id` thành đường dẫn database; không dùng giá trị client gửi để tạo đường dẫn trực tiếp.
-- [ ] Cập nhật API schema/request để nhận `dataset_id` khi xem schema và chạy truy vấn.
-- [ ] Đảm bảo `get_schema`, `execute_sql` và pipeline cùng dùng đúng SQLite database của dataset đang chọn.
-- [ ] Giữ demo database làm dataset mặc định cho luồng cũ, nhưng không dùng nó làm nơi nhập dữ liệu upload.
-- [ ] Kiểm thử upload → nhận `dataset_id` → đọc schema → chạy truy vấn thành công trên SQLite vừa tạo; đồng thời xác minh dữ liệu demo không bị thay đổi.
+- [X] Thay giả định database cố định trong `backend/container.py` bằng khả năng tạo/chọn repository theo `dataset_id`.
+- [X] Thêm registry/store dataset phía backend để tra `dataset_id` thành đường dẫn database; không dùng giá trị client gửi để tạo đường dẫn trực tiếp.
+- [X] Cập nhật API schema/request để nhận `dataset_id` khi xem schema và chạy truy vấn.
+- [X] Đảm bảo `get_schema`, `execute_sql` và pipeline cùng dùng đúng SQLite database của dataset đang chọn.
+- [X] Giữ demo database làm dataset mặc định cho luồng cũ, nhưng không dùng nó làm nơi nhập dữ liệu upload.
+- [X] Kiểm thử upload → nhận `dataset_id` → đọc schema → chạy truy vấn thành công trên SQLite vừa tạo; đồng thời xác minh dữ liệu demo không bị thay đổi.
 
 **Thành phần dự kiến:** `frontend/app.py`, `frontend/api_client.py`, `frontend/ui/`; API và schema trong `backend/api/`; importer/registry mới trong `backend/`; repository, container và pipeline hiện có.
 
 ## Giai đoạn 2 — Hỏi đáp trên dataset được chọn
 
-- [ ] Truyền `dataset_id` qua request truy vấn; từ chối dataset không tồn tại hoặc không khả dụng, không fallback sang demo database.
-- [ ] Đọc schema của dataset đang chọn và dùng schema đó trong prompt sinh SQL.
-- [ ] Không dùng few-shot bán hàng cố định nếu chúng không phù hợp với schema của dataset; cập nhật prompt để SQL chỉ tham chiếu các bảng/cột hiện có.
-- [ ] Tận dụng khóa ngoại SQLite khi dựng schema/prompt. Cho phép các bảng không liên quan được truy vấn riêng.
-- [ ] Với bảng không có khóa ngoại, không tự JOIN dựa riêng vào tên cột. Nếu câu hỏi cần JOIN, yêu cầu người dùng xác nhận bảng/cột liên kết hoặc làm rõ câu hỏi.
-- [ ] Thêm cơ chế khai báo quan hệ thủ công giữa bảng trong cùng dataset; chỉ đưa quan hệ đã xác nhận vào prompt.
-- [ ] Chỉ cho phép truy vấn đọc; từ chối lệnh ghi/thay đổi schema và nhiều statement.
-- [ ] Giới hạn thời gian thực thi, số dòng và kích thước kết quả.
-- [ ] Kiểm thử truy vấn thành công, SQL lỗi, kết quả rỗng, SQL không an toàn, dataset sai ID và không có quan hệ JOIN.
+- [X] Truyền `dataset_id` qua request truy vấn; từ chối dataset không tồn tại hoặc không khả dụng, không fallback sang demo database.
+- [X] Đọc schema của dataset đang chọn và dùng schema đó trong prompt sinh SQL.
+- [X] Không dùng few-shot bán hàng cố định nếu chúng không phù hợp với schema của dataset; cập nhật prompt để SQL chỉ tham chiếu các bảng/cột hiện có.
+- [X] Tận dụng khóa ngoại SQLite khi dựng schema/prompt. Cho phép các bảng không liên quan được truy vấn riêng.
+- [X] Với bảng không có khóa ngoại, không tự JOIN dựa riêng vào tên cột. Nếu câu hỏi cần JOIN, yêu cầu người dùng xác nhận bảng/cột liên kết hoặc làm rõ câu hỏi.
+- [X] Thêm cơ chế khai báo quan hệ thủ công giữa bảng trong cùng dataset; chỉ đưa quan hệ đã xác nhận vào prompt.
+- [X] Chỉ cho phép truy vấn đọc; từ chối lệnh ghi/thay đổi schema và nhiều statement.
+- [X] Giới hạn thời gian thực thi, số dòng và kích thước kết quả.
+- [X] Kiểm thử truy vấn thành công, SQL lỗi, kết quả rỗng, SQL không an toàn, dataset sai ID và không có quan hệ JOIN.
 
 **Thành phần dự kiến:** `backend/agents/sql_agent.py`, `backend/prompts/sql_prompts.py`, `backend/pipeline/orchestrator.py`, `backend/tools/sql_tools.py`, `backend/database/`, `backend/api/schemas.py`.
 
@@ -66,6 +66,7 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 - [ ] Bảo đảm API/UI trả lời text ngắn dựa trên kết quả truy vấn; không khẳng định số liệu không có trong kết quả.
 - [ ] Hiển thị SQL đã thực thi và bảng kết quả làm bằng chứng cho câu trả lời.
 - [ ] Cho phép người dùng chọn không vẽ, tự chọn loại biểu đồ hoặc yêu cầu loại biểu đồ cụ thể.
+- [ ] Tiến tới chuyển đổi thao tác của người dùng sang hết dạng text (người dùng hỏi đáp và yêu cầu vẽ biểu đồ, truy vấn qua prompt)
 - [ ] Chỉ chạy `VizAgent`/`RenderChartTool` khi biểu đồ được yêu cầu; tái sử dụng phần vẽ hiện tại nếu phù hợp.
 - [ ] Nếu tạo biểu đồ lỗi, vẫn giữ câu trả lời và bảng dữ liệu đã truy vấn thành công.
 - [ ] Kiểm thử trường hợp câu trả lời có kết quả, không có dữ liệu, truy vấn lỗi, biểu đồ không được yêu cầu và biểu đồ lỗi.

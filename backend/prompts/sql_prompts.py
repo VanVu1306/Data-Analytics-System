@@ -48,6 +48,32 @@ LIMIT 5
 """
 
 
+CLARIFY_PREFIX = "-- CLARIFY:"
+
+# Dataset do người dùng upload: schema bất kỳ -> không dùng few-shot bán hàng cố định.
+DATASET_SQL_SYSTEM_PROMPT = (
+    "You are an expert SQLite assistant. Given a database schema and a question, write exactly one read-only "
+    "SQLite SELECT query (a WITH ... SELECT is also fine). Output ONLY the SQL, no explanation, no markdown.\n"
+    "Rules:\n"
+    "- Use ONLY tables and columns that appear in the schema; quote names that contain spaces or special characters.\n"
+    "- JOIN tables ONLY when they are connected by a FOREIGN KEY listed in the schema. Never join tables just "
+    "because column names look similar. Tables without a relation must be queried separately.\n"
+    f"- If the question cannot be answered with the schema, or needs a join between tables that have no FOREIGN KEY "
+    f"relation, output a single line `{CLARIFY_PREFIX} <one short question asking the user to clarify or to confirm "
+    "how the tables are related>` written in the same language as the question, and no SQL.\n"
+    "- Never write INSERT/UPDATE/DELETE/DDL; only SELECT."
+)
+
+
+def build_dataset_prompt(question: str, schema: str) -> str:
+    """Prompt cho dataset upload: chỉ schema (kèm khóa ngoại/quan hệ đã xác nhận) + câu hỏi, không few-shot."""
+    return f"""/* Given the following database schema: */
+{schema}
+
+/* Answer the following: {question} */
+"""
+
+
 def build_dail_prompt(question: str, schema: str) -> str:
     """
     Prompt theo chuẩn DAIL-SQL:

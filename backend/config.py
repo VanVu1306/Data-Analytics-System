@@ -68,6 +68,14 @@ class Settings:
     ollama_temperature: float
     ollama_top_p: float
 
+    # ── Dataset upload / truy vấn ──────────────────────────────────────────
+    dataset_dir: str            # nơi backend lưu mỗi dataset upload (data.db + meta.json)
+    max_upload_mb: int
+    import_timeout_seconds: float
+    max_rows_per_table: int
+    query_timeout_seconds: float
+    query_max_rows: int
+
     # ── Visualization ──────────────────────────────────────────────────────
     viz_sample_rows: int  # số dòng mẫu đưa vào prompt Stage 3
     chart_dpi: int        # DPI khi render figure -> PNG
@@ -95,6 +103,12 @@ def load_settings() -> Settings:
         ollama_max_tokens=_env_int("OLLAMA_MAX_TOKENS", 512),
         ollama_temperature=_env_float("OLLAMA_TEMPERATURE", 0.1),
         ollama_top_p=_env_float("OLLAMA_TOP_P", 0.9),
+        dataset_dir=_env_str("NL2VIZ_DATASET_DIR", str(PROJECT_ROOT / "data" / "datasets")),
+        max_upload_mb=_env_int("NL2VIZ_MAX_UPLOAD_MB", 50),
+        import_timeout_seconds=_env_float("NL2VIZ_IMPORT_TIMEOUT", 60.0),
+        max_rows_per_table=_env_int("NL2VIZ_MAX_ROWS_PER_TABLE", 200_000),
+        query_timeout_seconds=_env_float("NL2VIZ_QUERY_TIMEOUT", 10.0),
+        query_max_rows=_env_int("NL2VIZ_QUERY_MAX_ROWS", 1000),
         viz_sample_rows=_env_int("VIZ_SAMPLE_ROWS", 3),
         chart_dpi=_env_int("CHART_DPI", 100),
     )

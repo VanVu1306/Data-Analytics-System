@@ -1,18 +1,18 @@
 """
 frontend/ui/sidebar.py
 ----------------------
-Sidebar: trạng thái Stage 1 / Stage 3, chọn model, schema DB, gợi ý câu hỏi.
+Sidebar: chọn dataset, trạng thái Stage 1 / Stage 3, chọn model, schema + quan hệ, gợi ý câu hỏi.
 Trả về SidebarState để phần chính biết người dùng đã chọn gì.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import streamlit as st
 
 from frontend.api_client import APIError, Health, NL2VizClient
-from frontend.config import SUGGESTIONS
+from frontend.ui.datasets import render_dataset_picker, render_schema_and_relations, suggestions_for
 
 
 @dataclass
@@ -23,6 +23,8 @@ class SidebarState:
     ollama_model: Optional[str]
     ollama_running: bool
     has_deepseek_key: bool
+    dataset_id: Optional[str] = None  # None = demo DB
+    tables: Optional[List[str]] = None  # None = không có dataset nào để hỏi
 
 
 def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
@@ -30,6 +32,15 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
 
     with st.sidebar:
         st.title("⚙️ Cấu hình")
+
+        # ── Dataset ───────────────────────────────────────────────────────
+        st.subheader("🗂️ Dataset")
+        dataset_id = render_dataset_picker(demo_available=health.db_exists)
+        has_dataset = health.db_exists or dataset_id is not None
+        if not has_dataset:
+            st.info("Chưa có dataset. Hãy upload tệp dữ liệu ở trang chính\n(hoặc chạy `python scripts/create_demo_db.py` để tạo demo DB).")
+
+        st.divider()
 
         # ── Stage 1: DAIL-SQL (DeepSeek) ──────────────────────────────────
         st.subheader("🔮 Stage 1: DAIL-SQL")
@@ -84,27 +95,21 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
 
         st.divider()
 
-        # ── DB schema ─────────────────────────────────────────────────────
-        st.subheader("🗄️ Database Schema")
-        if not health.db_exists:
-            st.error("Demo DB chưa tạo. Chạy:\n```\npython scripts/create_demo_db.py\n```")
-            st.stop()
+        # ── Schema + quan hệ + gợi ý câu hỏi ──────────────────────────────
+        tables: Optional[List[str]] = None
+        if has_dataset:
+            st.subheader("📋 Schema")
+            try:
+                schema = render_schema_and_relations(client, dataset_id)
+                tables = list(schema.tables)
+            except APIError as e:
+                st.error(f"Cannot read DB: {e}")
 
-        try:
-            for table, cols in client.schema().items():
-                with st.expander(f"📋 {table} ({len(cols)} cols)"):
-                    for c in cols:
-                        st.caption(f"• {c}")
-        except APIError as e:
-            st.error(f"Cannot read DB: {e}")
-            st.stop()
-
-        # ── Gợi ý câu hỏi ─────────────────────────────────────────────────
-        st.divider()
-        st.subheader("💡 Gợi ý câu hỏi")
-        for s in SUGGESTIONS:
-            if st.button(s, key=f"sug_{s}", width="stretch"):
-                st.session_state["question_input"] = s
+            st.divider()
+            st.subheader("💡 Gợi ý câu hỏi")
+            for sug in suggestions_for(tables or [], dataset_id):
+                if st.button(sug, key=f"sug_{dataset_id}_{sug}", width="stretch"):
+                    st.session_state["question_input"] = sug
 
     return SidebarState(
         sql_use_mock=sql_use_mock,
@@ -113,4 +118,6 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
         ollama_model=ollama_model,
         ollama_running=health.ollama_running,
         has_deepseek_key=health.deepseek_configured,
+        dataset_id=dataset_id,
+        tables=tables,
     )

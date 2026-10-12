@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from backend.database import DatasetStore, quote_ident
 from backend.tools.base import Tool
 
 
@@ -152,10 +153,20 @@ plt.tight_layout()"""
 
 class MockSQLTool(Tool):
     name = "mock_sql"
-    description = "Sinh SQL mẫu theo keyword (không gọi LLM)."
+    description = (
+        "Sinh SQL mẫu (không gọi LLM): theo keyword cho demo DB; với dataset upload chỉ xem trước bảng đầu tiên."
+    )
 
-    def run(self, question: str) -> str:
-        return mock_sql(question)
+    def __init__(self, store: DatasetStore | None = None):
+        self._store = store
+
+    def run(self, question: str, dataset_id: str | None = None) -> str:
+        if dataset_id is None or self._store is None:
+            return mock_sql(question)
+        tables = self._store.repository(dataset_id).get_schema_dict()
+        if not tables:
+            return "SELECT 1"
+        return f"SELECT * FROM {quote_ident(next(iter(tables)))} LIMIT 10"
 
 
 class MockVizCodeTool(Tool):

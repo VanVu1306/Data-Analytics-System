@@ -20,7 +20,7 @@ def extract_sql(raw: str) -> str:
     if m:
         raw = m.group(1).strip()
 
-    if not raw.upper().startswith("SELECT"):
+    if not raw.upper().startswith(("SELECT", "WITH", "--")):
         raw = "SELECT " + raw
 
     raw = raw.rstrip(";").strip()

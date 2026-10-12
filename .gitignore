@@ -7,3 +7,5 @@ demo_db/
 .env
 __MACOSX/
 spider_data/
+data/
+.streamlit/secrets.toml
