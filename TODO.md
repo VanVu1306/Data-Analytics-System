@@ -1,98 +1,107 @@
-# Kế hoạch: Upload dữ liệu và phân tích bằng ngôn ngữ tự nhiên
+# TODO: Upload dữ liệu và phân tích bằng ngôn ngữ tự nhiên
 
 ## Mục tiêu
 
-Cho phép người dùng tải dữ liệu của họ lên, đặt câu hỏi bằng ngôn ngữ tự nhiên và nhận:
+Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ liệu về SQLite để tái sử dụng pipeline hiện tại, chọn dataset vừa upload và hỏi bằng ngôn ngữ tự nhiên. Hệ thống trả câu trả lời dạng text, SQL và bảng kết quả làm bằng chứng; vẽ biểu đồ khi người dùng yêu cầu.
 
-- Câu trả lời dạng văn bản dựa trên dữ liệu.
-- SQL đã thực thi và bảng kết quả làm bằng chứng.
-- Biểu đồ khi người dùng yêu cầu.
+## Nguyên tắc thiết kế
 
-## Phạm vi và quyết định cần chốt
+- Mỗi lần upload tạo một dataset/database SQLite riêng, không ghép vào `demo_db/sales_demo.db` hoặc dataset khác.
+- Lưu database upload trong vùng lưu trữ do backend quản lý; client chỉ nhận và gửi `dataset_id`, không cung cấp đường dẫn file.
+- Các bảng/sheet trong cùng một file Excel được import vào cùng database SQLite để có thể truy vấn cùng nhau.
+- Chỉ JOIN khi có quan hệ khóa ngoại hoặc quan hệ đã được người dùng xác nhận. Không tự nối bảng chỉ vì tên cột giống nhau.
+- Nếu dữ liệu không có quan hệ, vẫn cho phép truy vấn từng bảng độc lập. Nếu câu hỏi đòi hỏi kết hợp bảng nhưng không xác định được quan hệ, yêu cầu người dùng làm rõ thay vì tự suy đoán.
+- MVP không thực thi file script `.sql` tùy ý. Ưu tiên nhận CSV, Excel, JSON dạng bảng và SQLite database; làm rõ hỗ trợ `.sql` script trong giai đoạn sau.
 
-- [ ] Xác định định dạng cần hỗ trợ ở phiên bản đầu: Excel (`.xlsx`), JSON (`.json`), CSV và SQLite (`.db`/`.sqlite`).
-- [ ] Làm rõ “SQL”: file database SQLite hay file script `.sql`. Nếu hỗ trợ script, import vào database cô lập; không chạy script trên database hệ thống.
-- [ ] Chọn chính sách lưu dữ liệu: chỉ trong phiên hay lưu lâu dài; xác định thời hạn lưu và quy tắc xóa.
-- [ ] Chốt giới hạn kích thước tệp, số dòng, số bảng/sheet và cấu trúc JSON được chấp nhận.
-- [ ] Xác định mô hình định danh và cô lập dataset theo người dùng/phiên. Không dùng ID do client tự chọn làm đường dẫn lưu trực tiếp.
+## Giai đoạn 1 — MVP: Upload trên UI và chuẩn hóa thành SQLite
 
-## Giai đoạn 1 — Upload và import dataset
+### Frontend
 
-- [ ] Thêm API upload, ví dụ `POST /api/datasets`, nhận tệp multipart/form-data.
-- [ ] Kiểm tra định dạng theo nội dung và phần mở rộng, dung lượng, cấu trúc, dữ liệu lỗi và tên tệp.
-- [ ] Tạo bộ import theo định dạng:
-  - [ ] Excel: import từng sheet thành bảng, xử lý tên bảng/cột và kiểu dữ liệu.
-  - [ ] JSON: xác định cấu trúc hợp lệ và ánh xạ bản ghi thành bảng/cột.
-  - [ ] CSV: import thành bảng với kiểu dữ liệu phù hợp.
-  - [ ] SQLite: xác thực database và chỉ cho phép đọc dữ liệu.
-  - [ ] SQL script (nếu thuộc phạm vi): chỉ import trong database tạm/cô lập với chính sách câu lệnh được phép.
-- [ ] Lưu dataset ở vị trí do backend quản lý; tạo `dataset_id` không đoán được và metadata cần thiết.
-- [ ] Trả về `dataset_id`, tên dataset, danh sách bảng, trạng thái import và thông báo lỗi cụ thể.
-- [ ] Thêm kiểm thử cho upload hợp lệ, tệp rỗng/hỏng, định dạng không hỗ trợ, vượt giới hạn và lỗi import.
+- [ ] Thêm nút/khu vực upload dữ liệu trong giao diện Streamlit, dùng bộ chọn tệp và hiển thị tên tệp, định dạng, tiến độ/trạng thái.
+- [ ] Cho phép người dùng upload CSV, Excel (`.xlsx`) và SQLite (`.db`/`.sqlite`).
+- [ ] Sau khi upload thành công, hiển thị thông báo, `dataset_id`, các bảng đã import và số dòng; cho phép chọn dataset vừa upload làm dataset đang phân tích.
+- [ ] Hiển thị lỗi định dạng/import rõ ràng và giữ lại giao diện để người dùng có thể thử lại.
 
-**Backend dự kiến:** module import/dataset mới dưới `backend/`, API và schema trong `backend/api/`, cấu hình giới hạn/lưu trữ trong `backend/config.py`.
+### Backend
 
-## Giai đoạn 2 — Khám phá và quản lý dataset
+- [ ] Thêm API nhận upload qua multipart/form-data, ví dụ `POST /api/datasets`.
+- [ ] Kiểm tra phần mở rộng và nội dung tệp, kích thước, tệp rỗng/hỏng và cấu trúc trước khi import.
+- [ ] Chuẩn hóa dữ liệu về một SQLite database riêng cho mỗi upload:
 
-- [ ] Thêm API lấy schema theo dataset, ví dụ `GET /api/datasets/{dataset_id}/schema`.
-- [ ] Thêm API xem preview giới hạn số dòng, ví dụ `GET /api/datasets/{dataset_id}/preview`.
-- [ ] Thêm API liệt kê dataset hiện có nếu chính sách lưu trữ cho phép.
-- [ ] Thêm API xóa dataset, ví dụ `DELETE /api/datasets/{dataset_id}`, xóa cả tệp dữ liệu và metadata liên quan.
-- [ ] Trả lỗi rõ ràng khi dataset không tồn tại, hết hạn hoặc người gọi không có quyền truy cập.
-- [ ] Kiểm thử đảm bảo dataset của phiên/người dùng này không thể truy cập từ phiên/người dùng khác.
+  - [ ] CSV: một tệp thành một bảng.
+  - [ ] Excel: mỗi sheet thành một bảng trong cùng database.
+  - [ ] SQLite: kiểm tra database hợp lệ và sao chép/import vào vùng lưu trữ do backend quản lý.
+- [ ] Chuẩn hóa tên bảng/cột và kiểu dữ liệu; xử lý tên trùng, ô rỗng, giá trị không đồng nhất và tên sheet không hợp lệ một cách nhất quán.
+- [ ] Lưu metadata gắn `dataset_id` với đường dẫn SQLite do server tạo, tên nguồn, định dạng, thời điểm upload và trạng thái import.
+- [ ] Trả `dataset_id`, schema/tên bảng, số dòng và thông tin lỗi/cảnh báo import về frontend.
+- [ ] Thêm giới hạn kích thước upload và dọn tệp tạm khi import thất bại.
 
-**Backend dự kiến:** thay thế giả định một database cố định trong `backend/container.py` bằng cách chọn repository theo dataset đã xác thực. Repository cần cung cấp schema, mẫu dữ liệu và truy vấn cho đúng dataset.
+### Nối vào backend hiện tại để chạy được
 
-## Giai đoạn 3 — Hỏi đáp trên dataset đã chọn
+- [ ] Thay giả định database cố định trong `backend/container.py` bằng khả năng tạo/chọn repository theo `dataset_id`.
+- [ ] Thêm registry/store dataset phía backend để tra `dataset_id` thành đường dẫn database; không dùng giá trị client gửi để tạo đường dẫn trực tiếp.
+- [ ] Cập nhật API schema/request để nhận `dataset_id` khi xem schema và chạy truy vấn.
+- [ ] Đảm bảo `get_schema`, `execute_sql` và pipeline cùng dùng đúng SQLite database của dataset đang chọn.
+- [ ] Giữ demo database làm dataset mặc định cho luồng cũ, nhưng không dùng nó làm nơi nhập dữ liệu upload.
+- [ ] Kiểm thử upload → nhận `dataset_id` → đọc schema → chạy truy vấn thành công trên SQLite vừa tạo; đồng thời xác minh dữ liệu demo không bị thay đổi.
 
-- [ ] Mở rộng request truy vấn để nhận `dataset_id`, câu hỏi và tùy chọn biểu đồ.
-- [ ] Truyền schema cùng một số dòng mẫu của dataset đã chọn vào bước sinh SQL.
-- [ ] Thay các ví dụ few-shot cố định theo database bán hàng bằng ví dụ phù hợp hơn với schema, hoặc loại bỏ ví dụ không liên quan.
-- [ ] Thực thi truy vấn chỉ đọc; từ chối lệnh ghi/thay đổi schema như `INSERT`, `UPDATE`, `DELETE`, `DROP` và các câu lệnh nhiều statement.
-- [ ] Giới hạn thời gian chạy, số dòng và kích thước kết quả để tránh truy vấn tốn tài nguyên.
-- [ ] Trả SQL, lỗi truy vấn và bảng kết quả nhất quán; không biến lỗi sinh SQL thành một câu SQL có vẻ hợp lệ.
-- [ ] Kiểm thử truy vấn thành công, lỗi SQL, kết quả rỗng, truy vấn bị từ chối và giới hạn kết quả.
+**Thành phần dự kiến:** `frontend/app.py`, `frontend/api_client.py`, `frontend/ui/`; API và schema trong `backend/api/`; importer/registry mới trong `backend/`; repository, container và pipeline hiện có.
 
-**Backend dự kiến:** cập nhật `backend/agents/sql_agent.py`, `backend/pipeline/orchestrator.py`, `backend/tools/sql_tools.py`, `backend/database/` và hợp đồng API trong `backend/api/schemas.py`.
+## Giai đoạn 2 — Hỏi đáp trên dataset được chọn
 
-## Giai đoạn 4 — Câu trả lời dạng text và biểu đồ tùy chọn
+- [ ] Truyền `dataset_id` qua request truy vấn; từ chối dataset không tồn tại hoặc không khả dụng, không fallback sang demo database.
+- [ ] Đọc schema của dataset đang chọn và dùng schema đó trong prompt sinh SQL.
+- [ ] Không dùng few-shot bán hàng cố định nếu chúng không phù hợp với schema của dataset; cập nhật prompt để SQL chỉ tham chiếu các bảng/cột hiện có.
+- [ ] Tận dụng khóa ngoại SQLite khi dựng schema/prompt. Cho phép các bảng không liên quan được truy vấn riêng.
+- [ ] Với bảng không có khóa ngoại, không tự JOIN dựa riêng vào tên cột. Nếu câu hỏi cần JOIN, yêu cầu người dùng xác nhận bảng/cột liên kết hoặc làm rõ câu hỏi.
+- [ ] Thêm cơ chế khai báo quan hệ thủ công giữa bảng trong cùng dataset; chỉ đưa quan hệ đã xác nhận vào prompt.
+- [ ] Chỉ cho phép truy vấn đọc; từ chối lệnh ghi/thay đổi schema và nhiều statement.
+- [ ] Giới hạn thời gian thực thi, số dòng và kích thước kết quả.
+- [ ] Kiểm thử truy vấn thành công, SQL lỗi, kết quả rỗng, SQL không an toàn, dataset sai ID và không có quan hệ JOIN.
 
-- [ ] Bổ sung bước tạo câu trả lời ngắn dựa trên câu hỏi và kết quả truy vấn.
-- [ ] Đảm bảo câu trả lời không đưa ra con số/nhận định không có trong kết quả truy vấn; báo rõ khi dữ liệu không đủ.
-- [ ] Trả lời API có các trường: câu trả lời, SQL, bảng kết quả, trạng thái, lỗi và thông tin biểu đồ.
-- [ ] Chỉ chạy bước tạo biểu đồ khi người dùng yêu cầu; hỗ trợ lựa chọn loại biểu đồ hoặc chế độ tự chọn.
-- [ ] Tái sử dụng `VizAgent` và `RenderChartTool` nếu phù hợp; không để lỗi biểu đồ làm mất câu trả lời và bảng truy vấn đã có.
-- [ ] Kiểm thử câu trả lời có căn cứ, kết quả rỗng/lỗi và biểu đồ được yêu cầu/không được yêu cầu.
+**Thành phần dự kiến:** `backend/agents/sql_agent.py`, `backend/prompts/sql_prompts.py`, `backend/pipeline/orchestrator.py`, `backend/tools/sql_tools.py`, `backend/database/`, `backend/api/schemas.py`.
 
-**Backend dự kiến:** mở rộng `PipelineRequest`, `PipelineResult`, `PipelineOrchestrator` và response schema; có thể bổ sung agent tạo câu trả lời text nếu cần tách trách nhiệm.
+## Giai đoạn 3 — Kết quả text, bằng chứng bảng và biểu đồ theo yêu cầu
 
-## Giai đoạn 5 — Giao diện người dùng
+- [ ] Bảo đảm API/UI trả lời text ngắn dựa trên kết quả truy vấn; không khẳng định số liệu không có trong kết quả.
+- [ ] Hiển thị SQL đã thực thi và bảng kết quả làm bằng chứng cho câu trả lời.
+- [ ] Cho phép người dùng chọn không vẽ, tự chọn loại biểu đồ hoặc yêu cầu loại biểu đồ cụ thể.
+- [ ] Chỉ chạy `VizAgent`/`RenderChartTool` khi biểu đồ được yêu cầu; tái sử dụng phần vẽ hiện tại nếu phù hợp.
+- [ ] Nếu tạo biểu đồ lỗi, vẫn giữ câu trả lời và bảng dữ liệu đã truy vấn thành công.
+- [ ] Kiểm thử trường hợp câu trả lời có kết quả, không có dữ liệu, truy vấn lỗi, biểu đồ không được yêu cầu và biểu đồ lỗi.
 
-- [ ] Thêm khu vực upload và hiển thị tiến độ/trạng thái import.
-- [ ] Cho phép chọn dataset đang hoạt động.
-- [ ] Hiển thị schema và preview để người dùng kiểm tra dữ liệu đã nạp.
-- [ ] Gắn câu hỏi và tùy chọn biểu đồ với dataset đang chọn.
-- [ ] Hiển thị câu trả lời text, SQL, bảng bằng chứng và biểu đồ (nếu có).
-- [ ] Cho phép xem danh sách/xóa dataset theo chính sách lưu trữ.
-- [ ] Hiển thị lỗi upload, truy vấn và quyền truy cập một cách rõ ràng.
+**Thành phần dự kiến:** mở rộng `PipelineRequest`, `PipelineResult`, `PipelineOrchestrator`, API response và phần hiển thị kết quả trong `frontend/ui/main_view.py`.
 
-**Frontend dự kiến:** bổ sung API client trong `frontend/api_client.py`; cập nhật luồng trang trong `frontend/app.py` và giao diện trong `frontend/ui/`.
+## Giai đoạn 4 — Quản lý dataset và quan hệ
 
-## Giai đoạn 6 — Bảo vệ dữ liệu và hoàn thiện
+- [ ] Thêm API xem danh sách dataset nếu chính sách lưu trữ cho phép.
+- [ ] Thêm API xem schema/preview dữ liệu của dataset, giới hạn số dòng trả về.
+- [ ] Thêm UI chọn dataset đã upload, xem schema/preview và quản lý quan hệ giữa các bảng.
+- [ ] Thêm API/UI xóa dataset, xóa cả metadata và file SQLite tương ứng.
+- [ ] Xác định chính sách lưu dữ liệu, thời hạn tồn tại và dọn dataset hết hạn.
+- [ ] Nếu chưa có tài khoản người dùng, xác định rõ dataset thuộc phiên nào và cách cô lập giữa các phiên; nếu có đăng nhập, kiểm tra quyền sở hữu ở mọi endpoint.
+- [ ] Kiểm thử truy cập chéo dataset/phiên bị từ chối và thao tác xóa không ảnh hưởng dataset khác.
 
-- [ ] Không tin cậy tên tệp, phần mở rộng, MIME type hoặc `dataset_id` từ client.
-- [ ] Cô lập dữ liệu và quyền truy cập giữa các dataset; không để truy vấn rơi về demo database khi dataset lỗi/không tồn tại.
-- [ ] Đặt giới hạn upload, import, thời gian truy vấn và kích thước phản hồi.
-- [ ] Có cơ chế dọn dataset hết hạn và xử lý tệp tạm khi import thất bại.
-- [ ] Không ghi nội dung dữ liệu nhạy cảm vào log hoặc gửi toàn bộ dữ liệu lên dịch vụ LLM nếu không cần thiết.
-- [ ] Cập nhật README về định dạng hỗ trợ, giới hạn, cách chạy, chính sách lưu/xóa và các biến cấu hình mới.
-- [ ] Chạy kiểm thử backend/API và kiểm tra thủ công luồng frontend hoàn chỉnh.
+## Giai đoạn 5 — Hoàn thiện, an toàn và tài liệu
 
-## Tiêu chí hoàn thành
+- [ ] Không tin cậy tên tệp, MIME type, `dataset_id` hoặc đường dẫn do client gửi.
+- [ ] Đặt giới hạn upload/import/truy vấn; không thực thi `.sql` script tùy ý trên môi trường ứng dụng.
+- [ ] Không ghi dữ liệu nhạy cảm vào log hoặc gửi toàn bộ dữ liệu lên LLM khi không cần thiết; chỉ gửi schema và lượng mẫu tối thiểu phù hợp.
+- [ ] Cập nhật README về định dạng được hỗ trợ, quy tắc chuẩn hóa, giới hạn, chính sách lưu/xóa và cách sử dụng chức năng upload.
+- [ ] Chạy các kiểm thử backend/API và kiểm tra thủ công luồng hoàn chỉnh trên UI.
 
-- Người dùng có thể tải định dạng nằm trong phạm vi hỗ trợ và thấy schema/preview của dataset đã import.
-- Câu hỏi được thực thi trên đúng dataset đã chọn; dữ liệu giữa các dataset được cô lập.
-- Phản hồi có câu trả lời text và bảng kết quả cùng SQL làm bằng chứng.
-- Biểu đồ chỉ được tạo khi được yêu cầu; lỗi biểu đồ không làm mất kết quả truy vấn.
-- Upload lỗi, dataset không hợp lệ/không tồn tại và SQL không an toàn đều bị từ chối với thông báo rõ ràng.
-- Các kiểm thử liên quan đến import, API, cô lập dataset và pipeline đều đạt.
+## Tiêu chí hoàn thành MVP
+
+- Người dùng upload được CSV, Excel hoặc SQLite từ UI và nhận trạng thái import rõ ràng.
+- Mỗi upload thành một SQLite database riêng; upload không ghi đè demo database hay dataset khác.
+- Người dùng chọn dataset vừa upload và chạy được pipeline hiện tại trên đúng dữ liệu đó.
+- Schema và bảng kết quả phản ánh dataset đã chọn; không tự fallback sang database khác.
+- Các bảng không liên quan vẫn truy vấn riêng được; không JOIN nếu không có quan hệ xác định/được xác nhận.
+- Tệp sai định dạng, hỏng, vượt giới hạn hoặc JSON chưa hỗ trợ bị từ chối với lỗi dễ hiểu.
+
+## Tiêu chí hoàn thành toàn bộ
+
+- Câu trả lời text có SQL và bảng truy vấn làm bằng chứng.
+- Biểu đồ chỉ được tạo khi người dùng yêu cầu; lỗi biểu đồ không làm mất kết quả truy vấn.
+- Dataset được cô lập, có thể xem/xóa theo chính sách đã định.
+- Các kiểm thử import, schema, truy vấn, cô lập dataset, bảo vệ SQL và hiển thị kết quả đều đạt.
