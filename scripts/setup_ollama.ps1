@@ -37,6 +37,7 @@ Write-Host " ✅ SETUP DONE!                                 " -ForegroundColor 
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "`nNext steps:"
 Write-Host "  1. Verify server: curl http://localhost:11434/api/tags"
-Write-Host "  2. Set DEEPSEEK_API_KEY: `$env:DEEPSEEK_API_KEY = 'sk-...'"
+Write-Host "  2. Set DEEPSEEK_API_KEY: `$env:DEEPSEEK_API_KEY = 'sk-...'  (hoặc ghi vào file .env)"
 Write-Host "  3. Create DB: python scripts/create_demo_db.py"
-Write-Host "  4. Run app: streamlit run app.py"
+Write-Host "  4. Run backend:  uvicorn backend.main:app --host 127.0.0.1 --port 8000"
+Write-Host "  5. Run frontend: streamlit run frontend/app.py"
