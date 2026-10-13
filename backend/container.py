@@ -2,7 +2,7 @@
 backend/container.py
 --------------------
 Composition root: nơi DUY NHẤT khởi tạo và nối các thành phần
-(settings -> repo -> llm clients -> tools -> agents -> orchestrator).
+(settings -> repo -> llm clients -> tools -> agents (sql, viz, answer) -> orchestrator).
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
-from backend.agents import SQLAgent, VizAgent
+from backend.agents import AnswerAgent, SQLAgent, VizAgent
 from backend.config import Settings, get_settings
 from backend.database import DatasetStore, ImportLimits, SQLiteRepository
 from backend.llm import LLMClient, OllamaClient, create_cloud_llm
@@ -25,6 +25,7 @@ from backend.tools import (
     MockSQLTool,
     MockVizCodeTool,
     RenderChartTool,
+    TemplateAnswerTool,
     ToolRegistry,
     UnlinkTablesTool,
 )
@@ -41,6 +42,7 @@ class Container:
     tools: ToolRegistry
     sql_agent: SQLAgent
     viz_agent: VizAgent
+    answer_agent: AnswerAgent
     orchestrator: PipelineOrchestrator
 
 
@@ -84,10 +86,12 @@ def build_container(
     tools.register(MockSQLTool(datasets))
     tools.register(MockVizCodeTool())
     tools.register(RenderChartTool(dpi=settings.chart_dpi))
+    tools.register(TemplateAnswerTool())
 
     sql_agent = SQLAgent(llm=cloud_llm, tools=tools, settings=settings)
     viz_agent = VizAgent(local_llm=ollama, cloud_llm=cloud_llm, tools=tools, settings=settings)
-    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools)
+    answer_agent = AnswerAgent(llm=cloud_llm, tools=tools, settings=settings)
+    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools, answer_agent)
     dataset_service = DatasetService(tools, max_upload_bytes)
 
     return Container(
@@ -100,6 +104,7 @@ def build_container(
         tools=tools,
         sql_agent=sql_agent,
         viz_agent=viz_agent,
+        answer_agent=answer_agent,
         orchestrator=orchestrator,
     )
 

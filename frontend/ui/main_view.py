@@ -1,164 +1,199 @@
 """
 frontend/ui/main_view.py
 ------------------------
-Phần nội dung chính: tiêu đề, ô nhập câu hỏi, hiển thị kết quả 3 stage, màn hình giới thiệu.
+Phần nội dung chính: MỘT khung chat. Người dùng chỉ nhập câu hỏi; mỗi phản hồi của hệ thống gồm
+câu trả lời text -> bảng kết quả -> (biểu đồ nếu được yêu cầu) -> phần "Bằng chứng / SQL" có thể mở rộng.
+
+Trạng thái trong `st.session_state`:
+  messages   list các tin nhắn:
+               {"role": "user", "content": str}
+               {"role": "assistant", "result": QueryResult, "dataset": nhãn dataset}
+               {"role": "assistant", "summary": dict}             (thống kê dataset, không gọi LLM)
+               {"role": "assistant", "error": str}              (lỗi gọi backend)
+               {"role": "notice", "content": str}               (ví dụ: đã đổi dataset)
 """
 from __future__ import annotations
 
-from typing import Tuple
+import json
+from typing import Any, Dict, List, Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from frontend.api_client import QueryResult
-from frontend.config import CHART_HINTS, DEFAULT_QUESTION
-from frontend.ui.sidebar import SidebarState
-from frontend.ui.styles import step_label
+from frontend.ui.datasets import render_dataset_summary
+
+CHAT_PLACEHOLDER = "Hỏi về dữ liệu của bạn… (ví dụ: Doanh thu theo vùng, vẽ biểu đồ cột)"
 
 
 def render_header() -> None:
-    st.title("📊 NL2Viz — Natural Language to Visualization")
+    st.title("📊 Data Analytics Chatbot")
     st.caption(
-        "Pipeline: Câu hỏi → **Cloud LLM** → SQL → DataFrame → "
-        "**Text-to-Python** (Ollama local hoặc cloud fallback) → Biểu đồ"
-    )
-    st.caption("Upload CSV / Excel / SQLite của bạn, chọn dataset ở sidebar rồi đặt câu hỏi bằng ngôn ngữ tự nhiên.")
-
-
-def render_question_form(default_question: str = DEFAULT_QUESTION) -> Tuple[bool, str, str]:
-    """Trả về (run_btn, question, chart_hint)."""
-    # Giá trị mặc định đặt qua session_state (sidebar cũng ghi vào key này khi bấm gợi ý)
-    st.session_state.setdefault("question_input", default_question)
-    question = st.text_input(
-        "Nhập câu hỏi của bạn:",
-        placeholder="Ví dụ: What is the revenue by region?",
-        key="question_input",
+        "**Stage 1** Câu hỏi → SQL  ·  **Stage 2** Thực thi SQL → bảng kết quả + câu trả lời  ·  "
+        "**Stage 3** Vẽ biểu đồ (chỉ khi bạn yêu cầu)"
     )
 
-    col_run, col_chart_type = st.columns([3, 1])
-    with col_run:
-        run_btn = st.button("▶ Chạy Pipeline", type="primary", width="stretch")
-    with col_chart_type:
-        chart_hint = st.selectbox(
-            "Gợi ý chart",
-            CHART_HINTS,
-            index=0,
-            label_visibility="collapsed",
-        )
-    return run_btn, question, chart_hint
+
+def messages() -> List[Dict[str, Any]]:
+    return st.session_state.setdefault("messages", [])
 
 
-def render_results(result: QueryResult, state: SidebarState) -> None:
-    # ═══ STAGE 1: DAIL-SQL → SQL ═══
-    step_label("Stage 1 · DAIL-SQL → SQL Query")
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.caption("**SQL được sinh ra:**")
-        st.code(result.sql, language="sql")
-    with col2:
-        with st.expander("📄 Xem DAIL Prompt"):
-            st.code(result.sql_prompt, language="text")
+# ── Tin nhắn ───────────────────────────────────────────────────────────────
+def render_message(msg: Dict[str, Any]) -> None:
+    role = msg["role"]
+    if role == "notice":
+        st.caption(f"— {msg['content']} —")
+    elif role == "user":
+        with st.chat_message("user"):
+            st.markdown(msg["content"])
+    else:
+        with st.chat_message("assistant"):
+            render_assistant_body(msg)
 
-    # ═══ STAGE 2: Execute SQL → DataFrame ═══
-    step_label("Stage 2 · Thực thi SQL → DataFrame")
+
+def render_assistant_body(msg: Dict[str, Any]) -> None:
+    if "error" in msg:
+        st.error(f"❌ {msg['error']}")
+        return
+    if "summary" in msg:
+        render_dataset_summary(msg["summary"])
+        return
+    result: QueryResult = msg["result"]
 
     if result.status == "needs_clarification":
         st.info(
             f"🤔 Cần làm rõ trước khi truy vấn: {result.clarification}\n\n"
             "Hãy diễn đạt lại câu hỏi, hoặc khai báo quan hệ giữa các bảng ở mục **🔗 Quan hệ giữa các bảng** "
-            "trong sidebar rồi chạy lại."
+            "trong sidebar rồi hỏi lại."
         )
+    elif result.status == "sql_error":
+        st.error(
+            "❌ Không thực hiện được truy vấn cho câu hỏi này. Hãy thử diễn đạt lại, "
+            "hoặc mở phần **Bằng chứng / SQL** bên dưới để xem chi tiết lỗi."
+        )
+    else:
+        _render_answer_and_table(result)
+        _render_chart(result)
+
+    _render_evidence(result)
+    if msg.get("dataset"):
+        st.caption(f"Dataset: {msg['dataset']}")
+
+
+def _render_answer_and_table(result: QueryResult) -> None:
+    if result.answer:
+        st.markdown(result.answer.text)
+    if result.status == "empty_result":
         return
+    if result.evidence.truncated:
+        st.warning(
+            "⚠️ Kết quả quá lớn nên đã bị cắt bớt theo giới hạn của hệ thống. "
+            "Hãy thu hẹp câu hỏi (lọc/gộp/LIMIT)."
+        )
+    if result.df is not None:
+        st.dataframe(result.df, width="stretch", height=min(400, 38 + 35 * len(result.df)))
 
-    if result.status == "sql_error":
-        st.error(f"❌ Lỗi SQL: {result.sql_error}")
-        return
 
-    if result.status == "empty_result" or result.df is None or result.df.empty:
-        st.warning("⚠️ Query thành công nhưng không có dữ liệu trả về.")
-        return
+def _render_chart(result: QueryResult) -> None:
+    chart = result.chart
+    if chart.status == "ok" and chart.png:
+        st.image(chart.png, width="stretch")
+    elif chart.status == "error":
+        st.warning(
+            "⚠️ Không vẽ được biểu đồ — câu trả lời và bảng kết quả ở trên vẫn đúng. "
+            "Chi tiết lỗi ở phần **Chi tiết biểu đồ**."
+        )
+    if chart.status != "not_requested" and (chart.code or chart.error):
+        with st.expander("🐍 Chi tiết biểu đồ", expanded=False):
+            tabs = st.tabs(["Mã Python", "Prompt", "Lỗi"] if chart.error else ["Mã Python", "Prompt"])
+            with tabs[0]:
+                st.caption(f"Nguồn: {chart.source or '—'} · loại: {chart.chart_type or 'tự chọn'}")
+                if chart.code:
+                    st.code(chart.code, language="python")
+            with tabs[1]:
+                st.code(chart.prompt or "", language="text")
+            if chart.error:
+                with tabs[2]:
+                    st.code(chart.error, language="text")
 
-    df = result.df
-    st.success(f"✅ Trả về {len(df)} dòng × {len(df.columns)} cột")
-    if result.truncated:
-        st.warning("⚠️ Kết quả quá lớn nên đã bị cắt bớt theo giới hạn của hệ thống. Hãy thu hẹp câu hỏi (lọc/gộp/LIMIT).")
-    st.dataframe(df, width="stretch", height=200)
 
-    # ═══ STAGE 3: Text-to-Python → Chart ═══
-    step_label("Stage 3 · Text-to-Python → Biểu đồ")
+def _render_evidence(result: QueryResult) -> None:
+    ev = result.evidence
+    if not (ev.sql or ev.sql_error):
+        return  # ví dụ: cần làm rõ, chưa có SQL nào được thực thi
+    with st.expander("🔎 Bằng chứng / SQL", expanded=ev.show_sql):
+        tab_sql, tab_exec, tab_prompt = st.tabs(["SQL đã thực thi", "Thông tin thực thi", "Prompt (debug)"])
+        with tab_sql:
+            if ev.sql:
+                st.code(ev.sql, language="sql")
+            if ev.sql_error:
+                st.error(f"Lỗi: {ev.sql_error}")
+        with tab_exec:
+            rows = f"{ev.row_count:,} dòng × {ev.column_count} cột" if ev.row_count is not None else "—"
+            st.markdown(
+                f"- **Kết quả:** {rows}" + (" _(đã bị cắt theo giới hạn hệ thống)_" if ev.truncated else "") + "\n"
+                f"- **Thời gian thực thi SQL:** {f'{ev.elapsed_ms} ms' if ev.elapsed_ms is not None else '—'}\n"
+                f"- **Nguồn SQL:** {ev.sql_source}\n"
+                f"- **Nguồn câu trả lời:** {result.answer.source if result.answer else '—'}"
+                + (f" _(dùng câu mẫu: {result.answer.fallback_reason})_" if result.answer and result.answer.fallback_reason else "")
+            )
+        with tab_prompt:
+            st.caption("Prompt gửi cho bước sinh SQL:")
+            st.code(ev.sql_prompt, language="text")
 
-    tab_chart, tab_code, tab_prompt = st.tabs(["📊 Biểu đồ", "🐍 Python Code", "📄 Viz Prompt"])
 
-    with tab_chart:
-        if result.viz_error:
-            st.error(f"❌ Lỗi khi vẽ biểu đồ:\n```\n{result.viz_error}\n```")
-        elif result.chart_png:
-            st.image(result.chart_png, width="stretch")
-            st.success("✅ Biểu đồ tạo thành công!")
+# ── Gợi ý câu hỏi (bong bóng phía trên ô nhập) ─────────────────────────────
+def render_suggestions(suggestions: List[str]) -> Optional[str]:
+    """Các bong bóng gợi ý; trả về câu được bấm (gửi như một tin nhắn chat) hoặc None."""
+    if not suggestions:
+        return None
+    clicked = None
+    with st.container(key="suggestions"):
+        cols = st.columns(len(suggestions))
+        for i, (col, text) in enumerate(zip(cols, suggestions)):
+            if col.button(text, key=f"sug_{i}", width="stretch"):
+                clicked = text
+    return clicked
+
+
+# Mã chạy trong ngữ cảnh của trang cha (không phải iframe) để observer/timer không bị hủy khi Streamlit
+# dựng lại iframe ở các lần rerun.
+_PARENT_JS = """
+(function () {
+  if (window.__nl2vizAutoScroll) return;      // chỉ cài một lần cho mỗi phiên trình duyệt
+  window.__nl2vizAutoScroll = true;
+  const SEL = '[data-testid="stChatMessage"]';
+  let count = 0, timer = null;
+  const scrollToLatest = () => {
+    const msgs = document.querySelectorAll(SEL);
+    if (msgs.length > count) msgs[msgs.length - 1].scrollIntoView({ behavior: "smooth", block: "start" });
+    count = msgs.length;
+  };
+  new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(scrollToLatest, 150); })
+    .observe(document.body, { childList: true, subtree: true });
+  scrollToLatest();
+})();
+"""
+
+_SCROLL_JS = (
+    "<script>(function(){const d=window.parent.document;"
+    "if(d.getElementById('nl2viz-autoscroll'))return;"
+    "const s=d.createElement('script');s.id='nl2viz-autoscroll';"
+    f"s.textContent={json.dumps(_PARENT_JS)};d.head.appendChild(s);}})();</script>"
+)
+
+
+def render_scroll_hook() -> None:
+    """Cuộn khung chat tới tin nhắn mới nhất (của người dùng hoặc hệ thống) mỗi khi có tin nhắn được thêm."""
+    with st.container(key="scroll_hook"):
+        if hasattr(st, "iframe"):  # Streamlit mới: components.v1.html sắp bị gỡ
+            st.iframe(_SCROLL_JS, height=1)
         else:
-            st.warning("Không tạo được biểu đồ.")
-
-    with tab_code:
-        st.caption("Mã Python được sinh bởi LLM:")
-        st.code(result.viz_code, language="python")
-
-    with tab_prompt:
-        st.caption("Prompt gửi cho Text-to-Python module:")
-        st.code(result.viz_prompt, language="text")
-
-    # Summary
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Rows returned", len(df))
-    m2.metric("Columns", len(df.columns))
-    cloud_label = "OpenAI GPT" if state.llm_provider == "openai" else "DeepSeek"
-    m3.metric(
-        "Mode",
-        "Llama3 Local"
-        if (state.viz_use_ollama and state.ollama_running and not state.viz_use_mock)
-        else (
-            cloud_label if state.has_cloud_llm_key and not state.viz_use_mock else "Mock"
-        ),
-    )
+            components.html(_SCROLL_JS, height=0)
 
 
 def render_intro() -> None:
-    st.info("👈 Upload dữ liệu (hoặc dùng demo), nhập câu hỏi hoặc chọn gợi ý từ sidebar, rồi nhấn **Chạy Pipeline**.")
-
-    with st.expander("📖 Architecture overview"):
-        st.markdown("""
-**Stage 1 — DAIL-SQL (Cloud LLM: DeepSeek hoặc OpenAI theo cấu hình)**
-- Code Representation Prompt (CRP)
-- Few-shot examples với Q+SQL pairs
-- Output: SQL query
-
-**Stage 2 — SQLite Executor**
-- Run SQL trên local DB
-- Return DataFrame
-
-**Stage 3 — Local-Python-Viz (Ollama Llama3)**
-- Zero-shot prompt (Context + Requirement + Constraint)
-- Llama3 chạy local → privacy-preserving
-- Sinh matplotlib code → sandbox exec → Figure
-        """)
-
-    with st.expander("🦙 Hướng dẫn cài Ollama"):
-        st.markdown("""
-1. **Tải Ollama:** https://ollama.com/download
-
-2. **Pull model:**
-```bash
-ollama pull llama3.2
-```
-
-3. **Start server (giữ terminal chạy):**
-```bash
-ollama serve
-```
-
-4. **Verify:**
-```bash
-curl http://localhost:11434/api/tags
-```
-
-5. **Restart streamlit app** để app detect được Ollama.
-        """)
+    st.info(
+        "👈 Upload dữ liệu ở sidebar (hoặc dùng demo), rồi hỏi bằng ngôn ngữ tự nhiên ở ô chat bên dưới. "
+        "Bấm một bong bóng gợi ý để thử nhanh."
+    )

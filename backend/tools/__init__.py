@@ -1,5 +1,7 @@
 """Tools: các hành động xác định mà agents/pipeline gọi theo tên."""
+from backend.tools.answer_tools import TemplateAnswerTool, answer_is_grounded, is_vietnamese, template_answer
 from backend.tools.base import Tool, ToolRegistry
+from backend.tools.intent import CHART_HINTS, CHART_TYPES, ChartPlan, detect_chart_request, detect_sql_request, resolve_chart_plan
 from backend.tools.mocks import MockSQLTool, MockVizCodeTool, mock_sql, mock_viz_code
 from backend.tools.data_tools import (
     ExecuteSQLTool,
@@ -23,6 +25,16 @@ __all__ = [
     "GetDatasetTool",
     "LinkTablesTool",
     "UnlinkTablesTool",
+    "TemplateAnswerTool",
+    "template_answer",
+    "answer_is_grounded",
+    "is_vietnamese",
+    "CHART_HINTS",
+    "CHART_TYPES",
+    "ChartPlan",
+    "detect_chart_request",
+    "detect_sql_request",
+    "resolve_chart_plan",
     "MockSQLTool",
     "MockVizCodeTool",
     "RenderChartTool",

@@ -36,22 +36,50 @@ class Schema:
 
 
 @dataclass
-class QueryResult:
-    status: str
-    question: str
-    full_question: str
+class Answer:
+    text: str
+    source: str                           # tên provider LLM | "template"
+    fallback_reason: Optional[str] = None
+
+
+@dataclass
+class Evidence:
+    """Bằng chứng: SQL đã thực thi + thông tin thực thi."""
+
     sql: str
-    sql_prompt: str
     sql_source: str
-    sql_error: Optional[str]
-    df: Optional[pd.DataFrame]
-    viz_code: Optional[str]
-    viz_prompt: Optional[str]
-    viz_source: Optional[str]
-    viz_error: Optional[str]
-    chart_png: Optional[bytes]
-    clarification: Optional[str] = None
+    sql_prompt: str
+    sql_error: Optional[str] = None
+    show_sql: bool = False
+    row_count: Optional[int] = None
+    column_count: Optional[int] = None
     truncated: bool = False
+    elapsed_ms: Optional[int] = None
+
+
+@dataclass
+class Chart:
+    """Nhánh biểu đồ, tách riêng khỏi truy vấn."""
+
+    status: str = "not_requested"         # not_requested | ok | error
+    requested_by: str = "none"            # none | option | prompt
+    chart_type: Optional[str] = None
+    png: Optional[bytes] = None
+    error: Optional[str] = None
+    code: Optional[str] = None
+    prompt: Optional[str] = None
+    source: Optional[str] = None
+
+
+@dataclass
+class QueryResult:
+    status: str                           # ok | sql_error | empty_result | needs_clarification
+    question: str
+    evidence: Evidence
+    chart: Chart
+    answer: Optional[Answer] = None
+    clarification: Optional[str] = None
+    df: Optional[pd.DataFrame] = None
 
 
 class NL2VizClient:
@@ -120,7 +148,8 @@ class NL2VizClient:
         self,
         question: str,
         *,
-        chart_hint: str = "auto",
+        chart_hint: str = "detect",
+        show_sql: bool = False,
         use_mock_sql: bool = False,
         use_ollama: bool = True,
         use_mock_viz: bool = False,
@@ -131,6 +160,7 @@ class NL2VizClient:
             "question": question,
             "dataset_id": dataset_id,
             "chart_hint": chart_hint,
+            "show_sql": show_sql,
             "use_mock_sql": use_mock_sql,
             "use_ollama": use_ollama,
             "use_mock_viz": use_mock_viz,
@@ -141,22 +171,23 @@ class NL2VizClient:
         df = None
         if d.get("table") is not None:
             df = pd.DataFrame(d["table"]["rows"], columns=d["table"]["columns"])
-        png = base64.b64decode(d["chart_png_base64"]) if d.get("chart_png_base64") else None
 
+        ev, ch = d["evidence"], d["chart"]
         return QueryResult(
             status=d["status"],
             question=d["question"],
-            full_question=d["full_question"],
-            sql=d["sql"],
-            sql_prompt=d["sql_prompt"],
-            sql_source=d["sql_source"],
-            sql_error=d.get("sql_error"),
-            df=df,
-            viz_code=d.get("viz_code"),
-            viz_prompt=d.get("viz_prompt"),
-            viz_source=d.get("viz_source"),
-            viz_error=d.get("viz_error"),
-            chart_png=png,
+            answer=Answer(**d["answer"]) if d.get("answer") else None,
             clarification=d.get("clarification"),
-            truncated=d.get("truncated", False),
+            df=df,
+            evidence=Evidence(**ev),
+            chart=Chart(
+                status=ch["status"],
+                requested_by=ch["requested_by"],
+                chart_type=ch.get("chart_type"),
+                png=base64.b64decode(ch["png_base64"]) if ch.get("png_base64") else None,
+                error=ch.get("error"),
+                code=ch.get("code"),
+                prompt=ch.get("prompt"),
+                source=ch.get("source"),
+            ),
         )

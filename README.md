@@ -1,6 +1,6 @@
 # Data-Analytics-System — kiến trúc Agentic (backend / frontend tách riêng)
 
-**Natural Language → SQL → DataFrame → Biểu đồ**, trên demo DB hoặc **dữ liệu người dùng tự upload** (CSV / Excel / SQLite). Code được tách thành các lớp rõ ràng (config, LLM, prompts, database, tools, agents, pipeline, API) và frontend chạy tách khỏi backend.
+**Một khung chat: câu hỏi → SQL → bảng kết quả → câu trả lời text (+ biểu đồ khi được yêu cầu)**, trên demo DB hoặc **dữ liệu người dùng tự upload** (CSV / Excel / SQLite). Code được tách thành các lớp rõ ràng (config, LLM, prompts, database, tools, agents, pipeline, API) và frontend chạy tách khỏi backend.
 
 ---
 
@@ -13,6 +13,7 @@
 └────────────────────┘                │  api ─► pipeline (Orchestrator)               │
                                       │            │                                  │
                                       │            ├─► agents/SQLAgent ─► llm/DeepSeek │
+                                      │            ├─► agents/AnswerAgent ─► llm/cloud │
                                       │            ├─► agents/VizAgent ─► llm/Ollama   │
                                       │            │                      llm/DeepSeek │
                                       │            └─► tools/ (execute_sql,            │
@@ -53,6 +54,7 @@ Data-Analytics-System/
 │   ├── llm/                   # base.py, deepseek_client.py, ollama_client.py
 │   ├── prompts/
 │   │   ├── sql_prompts.py     # DAIL-SQL cho demo DB; prompt theo schema (không few-shot) cho dataset upload
+│   │   ├── answer_prompts.py  # prompt câu trả lời text (chỉ gửi tối đa N dòng kết quả)
 │   │   └── viz_prompts.py     # Zero-shot Context + Requirement + Constraint
 │   ├── database/
 │   │   ├── sqlite_repo.py     # SQLiteRepository: schema, execute CHỈ-ĐỌC (timeout, giới hạn dòng/kích thước)
@@ -62,11 +64,13 @@ Data-Analytics-System/
 │   │   ├── base.py            # Tool (ABC) + ToolRegistry
 │   │   ├── data_tools.py      # get_schema, list_tables, execute_sql, import_dataset, get_dataset, link/unlink_tables
 │   │   ├── viz_tools.py       # render_chart: exec code matplotlib → PNG
+│   │   ├── intent.py          # nhận diện yêu cầu vẽ biểu đồ / xem SQL trong câu hỏi (hàm thuần)
+│   │   ├── answer_tools.py    # template_answer + answer_is_grounded (kiểm tra số liệu)
 │   │   ├── mocks.py           # mock_sql, mock_viz_code
 │   │   └── text_utils.py      # clean_code, is_valid_code, extract_sql (hàm thuần)
-│   ├── agents/                # sql_agent.py (Stage 1), viz_agent.py (Stage 3)
+│   ├── agents/                # sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
 │   └── pipeline/
-│       └── orchestrator.py    # PipelineOrchestrator (Stage 1→2→3) + DatasetService (cầu nối api → tools)
+│       └── orchestrator.py    # PipelineOrchestrator (SQL → thực thi → câu trả lời → biểu đồ tùy chọn) + DatasetService (cầu nối api → tools)
 ├── frontend/
 │   ├── app.py                 # Entrypoint Streamlit
 │   ├── api_client.py          # NL2VizClient: mọi lời gọi tới backend
@@ -93,21 +97,22 @@ Data-Analytics-System/
 
 ## 3. Luồng một request
 
-`POST /api/query` → `PipelineOrchestrator.run()`:
+`POST /api/query` → `PipelineOrchestrator.run()` (một luồng duy nhất, không có "chế độ"):
 
 ```
-1. SQLAgent.generate(question, dataset_id) tool get_schema(dataset_id) → prompt → DeepSeek → extract_sql
-                                          demo (dataset_id=None): prompt DAIL + few-shot bán hàng
-                                          dataset upload: prompt chỉ có schema + luật JOIN (không few-shot)
-                                          LLM trả `-- CLARIFY: ...` → status "needs_clarification" (dừng, không chạy SQL)
-                                          (không có key / chọn mock → tool mock_sql)
-2. tool execute_sql(sql, dataset_id)      chỉ-đọc, timeout, giới hạn dòng
-                                          lỗi → "sql_error"; 0 dòng → "empty_result" (dừng)
-3. VizAgent.generate_code(question+hint)  Ollama → (lỗi/không chạy) DeepSeek → mock
-4. tool render_chart(code, df)            exec → PNG; lỗi → status "viz_error"
+1. SQLAgent.generate(question, dataset_id)  prompt theo schema → LLM → SQL; `-- CLARIFY:` → "needs_clarification" (dừng)
+                                            lỗi gọi LLM → "sql_error" (không đem câu chú thích đi chạy)
+2. tool execute_sql(sql, dataset_id)        chỉ-đọc, timeout, giới hạn dòng; lỗi → "sql_error"; 0 dòng → "empty_result"
+3. AnswerAgent.generate(question, df)       LUÔN chạy khi truy vấn thành công: câu trả lời text ngắn
+                                            LLM (chỉ nhận cột + tối đa ANSWER_MAX_ROWS dòng đầu) → answer_is_grounded
+                                            → nếu số liệu không có trong kết quả / LLM lỗi / mock → tool template_answer
+4. (tùy chọn) biểu đồ                       chỉ khi người dùng yêu cầu: VizAgent.generate_code → tool render_chart
+                                            lỗi ở đây chỉ ghi vào `chart.status="error"`, text + bảng + SQL vẫn trả về
 ```
 
-Trong Stage 1 agent dùng câu hỏi gốc; gợi ý chart (`"... (as a pie chart)"`) chỉ được thêm vào Stage 3.
+**Khi nào vẽ biểu đồ** (`tools/intent.py` + tùy chọn `chart_hint`): mặc định `detect` — chỉ vẽ nếu câu hỏi có yêu cầu ("vẽ biểu đồ…", "plot…", "chart…"; loại cụ thể như "biểu đồ tròn/cột/đường/phân tán", "pie/bar/line/scatter"); `none` — không vẽ kể cả khi câu hỏi yêu cầu; `auto` — vẽ, tự chọn loại; hoặc một loại cụ thể. Câu phủ định ("không cần vẽ biểu đồ") không kích hoạt vẽ. **Khi nào mở sẵn SQL:** `show_sql=true` hoặc câu hỏi nhắc tới SQL ("cho xem SQL", "câu lệnh truy vấn"); SQL luôn có trong `evidence`.
+
+Trong bước SQL agent dùng câu hỏi gốc; loại biểu đồ (`"... (as a pie chart)"`) chỉ được thêm vào nhánh biểu đồ.
 
 **Chuỗi fallback của VizAgent** (giữ nguyên hành vi cũ, có test):
 
@@ -125,18 +130,29 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 ## 4. REST API
 
-| Method | Path                                     | Mô tả                                                                                                                                              |
-| ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/health`                          | `db_exists`, `llm_provider`, `llm_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                 |
-| GET    | `/api/schema?dataset_id=`              | `{tables: {tên_bảng: [cột...]}, relations: [...]}`; bỏ `dataset_id` = demo DB (503 nếu chưa tạo)                                          |
-| GET    | `/api/models`                          | Model Ollama đã pull + model mặc định                                                                                                           |
-| POST   | `/api/datasets`                        | Upload (multipart`file`): CSV / `.xlsx` / `.db` `.sqlite` → `201` + `dataset_id`, bảng, số dòng, cảnh báo                          |
-| GET    | `/api/datasets/{dataset_id}`           | Metadata dataset (bảng, cột, khóa ngoại, quan hệ đã xác nhận)                                                                               |
-| POST   | `/api/datasets/{dataset_id}/relations` | Xác nhận quan hệ`{from_table, from_column, to_table, to_column}` (kiểm tra bảng/cột tồn tại)                                               |
-| DELETE | `/api/datasets/{dataset_id}/relations` | Xóa một quan hệ đã xác nhận (cùng body)                                                                                                      |
-| POST   | `/api/query`                           | Chạy pipeline. Body:`question`, `dataset_id` (tùy chọn), `chart_hint`, `use_mock_sql`, `use_ollama`, `use_mock_viz`, `ollama_model` |
+| Method | Path                                     | Mô tả                                                                                                                                                                                                                                                         |
+| ------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/health`                          | `db_exists`, `llm_provider`, `llm_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                                                                                                                            |
+| GET    | `/api/schema?dataset_id=`              | `{tables: {tên_bảng: [cột...]}, relations: [...]}`; bỏ `dataset_id` = demo DB (503 nếu chưa tạo)                                                                                                                                                     |
+| GET    | `/api/models`                          | Model Ollama đã pull + model mặc định                                                                                                                                                                                                                      |
+| POST   | `/api/datasets`                        | Upload (multipart`file`): CSV / `.xlsx` / `.db` `.sqlite` → `201` + `dataset_id`, bảng, số dòng, cảnh báo                                                                                                                                     |
+| GET    | `/api/datasets/{dataset_id}`           | Metadata dataset (bảng, cột, khóa ngoại, quan hệ đã xác nhận)                                                                                                                                                                                          |
+| POST   | `/api/datasets/{dataset_id}/relations` | Xác nhận quan hệ`{from_table, from_column, to_table, to_column}` (kiểm tra bảng/cột tồn tại)                                                                                                                                                          |
+| DELETE | `/api/datasets/{dataset_id}/relations` | Xóa một quan hệ đã xác nhận (cùng body)                                                                                                                                                                                                                 |
+| POST   | `/api/query`                           | Hỏi đáp. Body:`question`, `dataset_id` (tùy chọn), `chart_hint` (`detect`\|`none`\|`auto`\|`bar chart`\|`line chart`\|`pie chart`\|`scatter plot`), `show_sql`, `use_mock_sql`, `use_ollama`, `use_mock_viz`, `ollama_model` |
 
-`/api/query` trả HTTP 200 kèm `status` ∈ `ok | sql_error | empty_result | viz_error | needs_clarification`, cùng mọi thứ đã tính được tới điểm dừng (SQL, prompt, bảng dữ liệu, `truncated`, `clarification`, code, ảnh PNG base64). **`dataset_id` không tồn tại/không hợp lệ → 404, không bao giờ fallback sang demo DB.** Lỗi dataset có dạng `{"detail": {"code", "message"}}`: `unsupported_format` 415, `file_too_large` 413, `invalid_file`/`unsafe_content`/`import_failed`/`invalid_relation` 422, `dataset_not_found`/`relation_not_found` 404. Tài liệu tương tác: `http://127.0.0.1:8000/docs`.
+`/api/query` trả HTTP 200 với hợp đồng tách rõ từng phần:
+
+```
+status    ok | sql_error | empty_result | needs_clarification      (chỉ phần truy vấn/trả lời)
+answer    {text, source, fallback_reason}  câu trả lời text (có cả khi kết quả rỗng; null khi lỗi SQL/cần làm rõ)
+clarification   câu hỏi làm rõ (khi needs_clarification)
+table     {columns, rows}                  bảng kết quả (bằng chứng)
+evidence  {sql, sql_source, sql_prompt, sql_error, show_sql, row_count, column_count, truncated, elapsed_ms}
+chart     {status: not_requested|ok|error, requested_by: none|option|prompt, chart_type, png_base64, error, code, prompt, source}
+```
+
+SQL/code/prompt nội bộ nằm trong `evidence`/`chart`, không thay thế `answer`. Lỗi biểu đồ **không** đổi `status`. **`dataset_id` không tồn tại/không hợp lệ → 404, không bao giờ fallback sang demo DB.** Lỗi dataset có dạng `{"detail": {"code", "message"}}`: `unsupported_format` 415, `file_too_large` 413, `invalid_file`/`unsafe_content`/`import_failed`/`invalid_relation` 422, `dataset_not_found`/`relation_not_found` 404. Tài liệu tương tác: `http://127.0.0.1:8000/docs`.
 
 ---
 
@@ -144,24 +160,25 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 Đọc từ biến môi trường hoặc file `.env` ở thư mục gốc (biến môi trường thật được ưu tiên). Giá trị mặc định = giá trị của bản cũ.
 
-| Biến                                                     | Mặc định                                      | Ý nghĩa                                                                                         |
-| --------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `LLM_PROVIDER`                                          | `deepseek`                                     | Chọn cloud provider:`deepseek` hoặc `openai`                                                |
-| `DEEPSEEK_API_KEY`                                      | *(rỗng)*                                      | Dùng khi`LLM_PROVIDER=deepseek`; rỗng → Stage 1 chạy mock SQL                               |
-| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                | `https://api.deepseek.com` / `deepseek-chat` | DeepSeek endpoint và model                                                                       |
-| `OPENAI_API_KEY` / `OPENAI_MODEL`                     | *(rỗng)* / `gpt-5.6`                        | Dùng khi`LLM_PROVIDER=openai`; client gửi giới hạn đầu ra bằng `max_completion_tokens` |
-| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                  | `0` / `512`                                  | Stage 1                                                                                           |
-| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`      | `0.1` / `800`                                | Stage 3 khi dùng cloud provider                                                                  |
-| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                    | `http://127.0.0.1:11434` / `llama3.2`        |                                                                                                   |
-| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                | `120` / `512`                                |                                                                                                   |
-| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                 | `0.1` / `0.9`                                |                                                                                                   |
-| `NL2VIZ_DB_PATH`                                        | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                                         |
-| `NL2VIZ_DATASET_DIR`                                    | `data/datasets`                                | Nơi lưu dataset upload                                                                          |
-| `NL2VIZ_MAX_UPLOAD_MB`                                  | `50`                                           | Giới hạn kích thước tệp upload                                                              |
-| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE` | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                                                 |
-| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`      | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                                           |
-| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                       | `3` / `100`                                  | Số dòng mẫu trong prompt Stage 3 / DPI ảnh                                                    |
-| `NL2VIZ_API_URL`                                        | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit`                     |
+| Biến                                                                | Mặc định                                      | Ý nghĩa                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`                                                     | `deepseek`                                     | Chọn cloud provider:`deepseek` hoặc `openai`                                                 |
+| `DEEPSEEK_API_KEY`                                                 | *(rỗng)*                                      | Dùng khi`LLM_PROVIDER=deepseek`; rỗng → SQL và câu trả lời chạy mock                     |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                           | `https://api.deepseek.com` / `deepseek-chat` | DeepSeek endpoint và model                                                                        |
+| `OPENAI_API_KEY` / `OPENAI_MODEL`                                | *(rỗng)* / `gpt-5.6`                        | Dùng khi`LLM_PROVIDER=openai`; client gửi giới hạn đầu ra bằng `max_completion_tokens`  |
+| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                             | `0` / `512`                                  | Stage 1                                                                                            |
+| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`                 | `0.1` / `800`                                | Stage 3 khi dùng cloud provider                                                                   |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                               | `http://127.0.0.1:11434` / `llama3.2`        |                                                                                                    |
+| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                           | `120` / `512`                                |                                                                                                    |
+| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                            | `0.1` / `0.9`                                |                                                                                                    |
+| `NL2VIZ_DB_PATH`                                                   | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                                          |
+| `NL2VIZ_DATASET_DIR`                                               | `data/datasets`                                | Nơi lưu dataset upload                                                                           |
+| `NL2VIZ_MAX_UPLOAD_MB`                                             | `50`                                           | Giới hạn kích thước tệp upload                                                               |
+| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE`            | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                                                  |
+| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`                 | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                                            |
+| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                                  | `3` / `100`                                  | Số dòng mẫu trong prompt biểu đồ / DPI ảnh                                                  |
+| `ANSWER_MAX_ROWS` / `ANSWER_MAX_TOKENS` / `ANSWER_TEMPERATURE` | `20` / `300` / `0`                         | Câu trả lời text: số dòng kết quả tối đa gửi cho LLM / giới hạn đầu ra / nhiệt độ |
+| `NL2VIZ_API_URL`                                                   | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit`                      |
 
 Dùng model Ollama tùy chỉnh: `ollama create llama3-fast -f scripts/Modelfile_llama3`, rồi đặt `OLLAMA_MODEL=llama3-fast`.
 
@@ -198,9 +215,9 @@ Mở `http://localhost:8501`. Không có key và không có Ollama thì app vẫ
 
 ### Dùng chức năng upload
 
-1. Mở trang chính → **📁 Upload dữ liệu** → chọn tệp → **Import dữ liệu**. Kết quả import (dataset_id, bảng, số dòng, cảnh báo) hiện ngay; dataset vừa upload tự được chọn.
-2. Chọn dataset ở sidebar (demo hoặc các tệp đã upload trong phiên), xem schema, nhập câu hỏi → **Chạy Pipeline**.
-3. Bảng không có khóa ngoại sẽ **không** bị tự JOIN. Nếu câu hỏi cần JOIN, hệ thống hỏi lại; bạn khai báo quan hệ ở **🔗 Quan hệ giữa các bảng** (sidebar) rồi chạy lại.
+1. Mở sidebar → **📁 Upload dữ liệu** (ngay dưới ô chọn dataset) → chọn tệp → **Import dữ liệu**. Kết quả import (dataset_id, bảng, số dòng, cảnh báo) hiện ngay; dataset vừa upload tự được chọn.
+2. Chọn dataset ở sidebar (demo hoặc các tệp đã upload trong phiên), xem schema, rồi hỏi ở ô chat (hoặc bấm một bong bóng gợi ý phía trên ô nhập; bong bóng **📋 Thống kê thông tin/schema dataset** hiện bảng/cột/số dòng/quan hệ của dataset đang chọn mà không gọi LLM; khung chat tự cuộn tới tin nhắn mới nhất). Phản hồi gồm câu trả lời + bảng; SQL nằm trong **🔎 Bằng chứng / SQL** (đóng sẵn, tự mở khi bạn hỏi “cho xem SQL”). Muốn biểu đồ, nêu loại ngay trong câu hỏi: “vẽ biểu đồ cột / đường / tròn / phân tán …”. Hướng dẫn cài Ollama nằm trong sidebar, mục vẽ biểu đồ.
+3. Bảng không có khóa ngoại sẽ **không** bị tự JOIN. Nếu câu hỏi cần JOIN, hệ thống hỏi lại; bạn khai báo quan hệ ở **🔗 Quan hệ giữa các bảng** (sidebar) rồi hỏi lại.
 
 Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mất khi tải lại trang (dữ liệu vẫn nằm trong `data/datasets/`; xem/xóa/hết hạn dataset là giai đoạn 4).
 
@@ -245,6 +262,10 @@ Phần lớn là chuyển code nguyên văn (prompt, few-shot, mock, làm sạch
 
 ---
 
+9. **Giai đoạn 3:** một khung chat thay cho form "Chạy Pipeline"; `/api/query` đổi sang hợp đồng lồng (`answer`/`table`/`evidence`/`chart`, không còn `viz_error` hay các trường `sql`, `viz_code`... ở cấp ngoài); biểu đồ mặc định KHÔNG vẽ; `chart_hint` mặc định `detect`; DeepSeek/OpenAI lỗi → `sql_error` thay vì chạy câu chú thích `-- Error ...` như SQL; metric "Mode" bị bỏ (thông tin nguồn thật nằm trong tab "Thông tin thực thi"); mock chart ưu tiên loại biểu đồ nêu rõ hơn từ khóa "tháng"; thông báo lỗi dùng tên provider "DeepSeek"/"OpenAI".
+
+---
+
 ## 9. Vấn đề đã biết — cố ý CHƯA sửa trong lần refactor này
 
 Vì yêu cầu là giữ nguyên chức năng, các điểm sau vẫn như bản cũ. Cột phải là chỗ cần sửa sau khi tách lớp:
@@ -254,8 +275,6 @@ Vì yêu cầu là giữ nguyên chức năng, các điểm sau vẫn như bản
 | **`exec` code LLM không phải sandbox** (`__builtins__` đầy đủ, không timeout)                                                          | `tools/viz_tools.py` → `RenderChartTool`                             |
 | **Privacy:** khi Ollama lỗi/không chạy và có key, **3 dòng dữ liệu thật vẫn gửi lên DeepSeek** (đã xác nhận khi chạy thử) | `prompts/viz_prompts.py`, `agents/viz_agent.py` → `_cloud_or_mock` |
 | `mock_sql`: nhánh `"product"` đứng trước `"top"` nên câu "Top 5 best-selling products" trả về doanh thu theo category                    | `tools/mocks.py`                                                        |
-| DeepSeek lỗi →`-- Error calling DeepSeek: ...` được trả về như một câu SQL rồi đem đi chạy                                              | `agents/sql_agent.py`, `pipeline/orchestrator.py`                     |
-| Metric "Mode" suy ra từ cấu hình, không phản ánh đường chạy thực tế (API đã có`viz_source` để dùng)                                 | `frontend/ui/main_view.py`                                              |
 | Không retry khi SQL/code lỗi;`OLLAMA_MAX_TOKENS=512` có thể cắt cụt code → rơi về mock                                                       | `pipeline/orchestrator.py`, cấu hình                                  |
 | Few-shot cố định, chưa chọn theo độ tương đồng (phần cốt lõi của DAIL-SQL)                                                               | `prompts/sql_prompts.py`, `agents/sql_agent.py`                       |
 | `extract_sql` có nhánh regex không bao giờ khớp (vô hại)                                                                                       | `tools/text_utils.py`                                                   |
@@ -267,3 +286,6 @@ Vì yêu cầu là giữ nguyên chức năng, các điểm sau vẫn như bản
 - **pytest (xem `pytest -q`):** fallback của hai agents, repository (kể cả chỉ-đọc/timeout/giới hạn dòng), tools, toàn bộ API qua HTTP với LLM giả, importer CSV/Excel/SQLite, upload → schema → truy vấn trên dataset, dataset sai ID → 404, quan hệ thủ công, làm rõ JOIN, demo DB không đổi (so hash).
 - **Chạy thật** backend bằng uvicorn + frontend bằng Streamlit `AppTest`: demo, upload sai định dạng (lỗi hiển thị, giữ UI), upload CSV → tự chọn dataset → chạy pipeline (mock) ra đúng bảng, upload SQLite có khóa ngoại, thêm quan hệ, đổi lại demo.
 - **Chưa thử** với Ollama thật hoặc DeepSeek API key thật (mới qua LLM giả): bạn nên chạy thử một lần với môi trường của mình, đặc biệt hành vi `-- CLARIFY:` của model thật.
+- **Giai đoạn 3 (có test):** nhận diện yêu cầu vẽ/SQL (có và không, phủ định, "cột"≠biểu đồ cột), loại biểu đồ cụ thể, tùy chọn `none`/`auto`, lỗi biểu đồ vẫn giữ text + bảng + SQL, lỗi cả stage biểu đồ bị cô lập, kết quả rỗng / SQL lỗi / cần làm rõ, câu trả lời LLM bám số liệu và fallback câu mẫu khi số liệu không có trong kết quả, chỉ gửi tối đa `ANSWER_MAX_ROWS` dòng cho LLM, kết quả bị cắt được báo trong câu trả lời. Frontend kiểm tra bằng Streamlit `AppTest` và ảnh chụp trình duyệt thật (chế độ mock).
+- **Chưa thử** câu trả lời của LLM thật: kiểm tra bám số liệu khá chặt (số tự tính, làm tròn, đổi đơn vị sẽ bị loại và dùng câu mẫu) — nên xem tỷ lệ `fallback_reason=ungrounded_numbers` trên model thật. Câu mẫu chọn tiếng Việt khi câu hỏi có dấu; tiếng Việt không dấu sẽ ra tiếng Anh.
+- **Test cũ fail sẵn:** `tests/test_llm_client.py::test_retries_with_max_completion_tokens_when_model_rejects_max_tokens` (phụ thuộc cách patch `openai` của phiên bản thư viện hiện tại), không liên quan giai đoạn 3.

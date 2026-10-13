@@ -23,7 +23,7 @@ from typing import Optional
 import pandas as pd
 
 from backend.config import Settings
-from backend.llm import LLMClient
+from backend.llm import LLMClient, provider_label
 from backend.prompts import VIZ_CLOUD_SYSTEM_PROMPT, build_viz_prompt
 from backend.tools import ToolRegistry, clean_code, is_valid_code
 
@@ -76,13 +76,13 @@ class VizAgent:
                     err_msg = f"\n\n[Ollama error: {e}]"
                     return self._cloud_or_mock(
                         df, question, prompt, err_msg,
-                        cloud_suffix=f" → fallback {self._cloud.name}",
+                        cloud_suffix=f" → fallback {provider_label(self._cloud.name)}",
                         mock_suffix=" → fallback Mock",
                     )
             err_msg = "\n\n[Ollama server not running at localhost:11434]"
             return self._cloud_or_mock(
                 df, question, prompt, err_msg,
-                cloud_suffix=f" → using {self._cloud.name}",
+                cloud_suffix=f" → using {provider_label(self._cloud.name)}",
                 mock_suffix=" → using Mock",
             )
 
@@ -91,7 +91,7 @@ class VizAgent:
             try:
                 return VizCodeGeneration(self._cloud_code(prompt), prompt, self._cloud.name)
             except Exception as e:
-                return self._mock(df, question, f"{prompt}\n\n[{self._cloud.name} error: {e}]")
+                return self._mock(df, question, f"{prompt}\n\n[{provider_label(self._cloud.name)} error: {e}]")
 
         return self._mock(df, question, prompt)
 

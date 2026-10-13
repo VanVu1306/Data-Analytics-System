@@ -1,7 +1,7 @@
 """
 frontend/ui/sidebar.py
 ----------------------
-Sidebar: chọn dataset, trạng thái Stage 1 / Stage 3, chọn model, schema + quan hệ, gợi ý câu hỏi.
+Sidebar: chọn dataset, cấu hình LLM (SQL + câu trả lời) và vẽ biểu đồ, upload, schema + quan hệ, hướng dẫn Ollama.
 Trả về SidebarState để phần chính biết người dùng đã chọn gì.
 """
 from __future__ import annotations
@@ -12,7 +12,17 @@ from typing import List, Optional
 import streamlit as st
 
 from frontend.api_client import APIError, Health, NL2VizClient
-from frontend.ui.datasets import render_dataset_picker, render_schema_and_relations, suggestions_for
+from frontend.api_client import Schema
+from frontend.ui.datasets import render_dataset_picker, render_schema_and_relations, render_upload_panel
+
+
+OLLAMA_GUIDE = """
+1. **Tải Ollama:** https://ollama.com/download
+2. **Pull model:** `ollama pull llama3.2`
+3. **Start server (giữ terminal chạy):** `ollama serve`
+4. **Verify:** `curl http://localhost:11434/api/tags`
+5. **Restart streamlit app** để app nhận ra Ollama.
+"""
 
 
 @dataclass
@@ -26,6 +36,7 @@ class SidebarState:
     has_cloud_llm_key: bool
     dataset_id: Optional[str] = None  # None = demo DB
     tables: Optional[List[str]] = None  # None = không có dataset nào để hỏi
+    schema: Optional[Schema] = None
 
 
 def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
@@ -37,21 +48,24 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
         # ── Dataset ───────────────────────────────────────────────────────
         st.subheader("🗂️ Dataset")
         dataset_id = render_dataset_picker(demo_available=health.db_exists)
+        render_upload_panel(client, health.max_upload_mb)  # ngay dưới ô chọn dataset
         has_dataset = health.db_exists or dataset_id is not None
         if not has_dataset:
-            st.info("Chưa có dataset. Hãy upload tệp dữ liệu ở trang chính\n(hoặc chạy `python scripts/create_demo_db.py` để tạo demo DB).")
+            st.info("Chưa có dataset. Hãy upload tệp dữ liệu ở trên\n(hoặc chạy `python scripts/create_demo_db.py` để tạo demo DB).")
 
         st.divider()
 
-        # ── Stage 1: SQL generation ──────────────────────────────────────
+        # ── Sinh SQL & trả lời ──────────────────────────────────────
         provider_label = "OpenAI GPT" if health.llm_provider == "openai" else "DeepSeek"
-        st.subheader(f"🔮 Stage 1: SQL ({provider_label})")
+        st.subheader(f"🔮 Sinh SQL & trả lời ({provider_label})")
         if health.llm_configured:
             st.markdown(
                 f'<span class="badge-real">🟢 {provider_label} API configured</span>',
                 unsafe_allow_html=True,
             )
-            sql_use_mock = st.checkbox("Use mock SQL (debugging)", value=False)
+            sql_use_mock = st.checkbox(
+                "Dùng mock (không gọi LLM) cho SQL & câu trả lời", value=False
+            )
         else:
             st.markdown(
                 f'<span class="badge-mock">🟡 No {provider_label} key — mock mode</span>',
@@ -63,8 +77,8 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
 
         st.divider()
 
-        # ── Stage 3: Text-to-Python (Ollama) ──────────────────────────────
-        st.subheader("🦙 Stage 3: Text-to-Python")
+        # ── Vẽ biểu đồ (Ollama) ──────────────────────────────
+        st.subheader("🦙 Vẽ biểu đồ (Text-to-Python)")
         if health.ollama_running:
             try:
                 local_models = client.models()
@@ -94,12 +108,15 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
             if health.llm_configured:
                 st.info(f"Sẽ dùng {provider_label} làm fallback")
 
-        viz_use_mock = st.checkbox("Use mock Viz code (debugging)", value=False)
+        viz_use_mock = st.checkbox("Dùng mock Viz code (debugging)", value=False)
+        with st.expander("🦙 Hướng dẫn cài Ollama"):
+            st.markdown(OLLAMA_GUIDE)
 
         st.divider()
 
         # ── Schema + quan hệ + gợi ý câu hỏi ──────────────────────────────
         tables: Optional[List[str]] = None
+        schema = None
         if has_dataset:
             st.subheader("📋 Schema")
             try:
@@ -107,12 +124,6 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
                 tables = list(schema.tables)
             except APIError as e:
                 st.error(f"Cannot read DB: {e}")
-
-            st.divider()
-            st.subheader("💡 Gợi ý câu hỏi")
-            for sug in suggestions_for(tables or [], dataset_id):
-                if st.button(sug, key=f"sug_{dataset_id}_{sug}", width="stretch"):
-                    st.session_state["question_input"] = sug
 
     return SidebarState(
         sql_use_mock=sql_use_mock,
@@ -124,4 +135,5 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
         has_cloud_llm_key=health.llm_configured,
         dataset_id=dataset_id,
         tables=tables,
+        schema=schema,
     )

@@ -14,7 +14,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import JSONResponse
 
 from backend.api.schemas import (
+    AnswerInfo,
+    ChartResult,
     DatasetResponse,
+    Evidence,
     HealthResponse,
     ModelsResponse,
     QueryRequest,
@@ -63,24 +66,40 @@ def _to_response(result: PipelineResult) -> QueryResponse:
         split = json.loads(result.df.to_json(orient="split", date_format="iso"))
         table = TableData(columns=[str(c) for c in split["columns"]], rows=split["data"])
 
-    png_b64 = base64.b64encode(result.chart_png).decode("ascii") if result.chart_png else None
-
+    answer = (
+        AnswerInfo(text=result.answer, source=result.answer_source or "template", fallback_reason=result.answer_fallback_reason)
+        if result.answer
+        else None
+    )
+    evidence = Evidence(
+        sql=result.sql,
+        sql_source=result.sql_source,
+        sql_prompt=result.sql_prompt,
+        sql_error=result.sql_error,
+        show_sql=result.show_sql,
+        row_count=len(result.df) if result.df is not None else None,
+        column_count=len(result.df.columns) if result.df is not None else None,
+        truncated=result.truncated,
+        elapsed_ms=result.elapsed_ms,
+    )
+    chart = ChartResult(
+        status=result.chart_status.value,
+        requested_by=result.chart_origin,
+        chart_type=result.chart_type,
+        png_base64=base64.b64encode(result.chart_png).decode("ascii") if result.chart_png else None,
+        error=result.chart_error,
+        code=result.viz_code,
+        prompt=result.viz_prompt,
+        source=result.viz_source,
+    )
     return QueryResponse(
         status=result.status.value,
         question=result.question,
-        full_question=result.full_question,
-        sql=result.sql,
-        sql_prompt=result.sql_prompt,
-        sql_source=result.sql_source,
+        answer=answer,
         clarification=result.clarification,
-        sql_error=result.sql_error,
         table=table,
-        truncated=result.truncated,
-        viz_code=result.viz_code,
-        viz_prompt=result.viz_prompt,
-        viz_source=result.viz_source,
-        viz_error=result.viz_error,
-        chart_png_base64=png_b64,
+        evidence=evidence,
+        chart=chart,
     )
 
 

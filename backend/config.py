@@ -83,6 +83,11 @@ class Settings:
     viz_sample_rows: int  # số dòng mẫu đưa vào prompt Stage 3
     chart_dpi: int        # DPI khi render figure -> PNG
 
+    # ── Trả lời text (giai đoạn 3) ─────────────────────────────────────────
+    answer_max_rows: int          # số dòng kết quả tối đa gửi cho LLM để viết câu trả lời
+    answer_max_tokens: int
+    answer_temperature: float
+
     @property
     def has_deepseek_key(self) -> bool:
         return bool(self.deepseek_api_key)
@@ -123,6 +128,9 @@ def load_settings() -> Settings:
         query_max_rows=_env_int("NL2VIZ_QUERY_MAX_ROWS", 1000),
         viz_sample_rows=_env_int("VIZ_SAMPLE_ROWS", 3),
         chart_dpi=_env_int("CHART_DPI", 100),
+        answer_max_rows=_env_int("ANSWER_MAX_ROWS", 20),
+        answer_max_tokens=_env_int("ANSWER_MAX_TOKENS", 300),
+        answer_temperature=_env_float("ANSWER_TEMPERATURE", 0.0),
     )
 
 

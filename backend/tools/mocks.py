@@ -6,6 +6,8 @@ hoặc người dùng bật chế độ debug. Logic giữ nguyên như bản g�
 """
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from backend.database import DatasetStore, quote_ident
@@ -64,7 +66,10 @@ def mock_viz_code(df: pd.DataFrame, question: str) -> str:
     cat_cols = df.select_dtypes(exclude="number").columns.tolist()
     q = question.lower()
 
-    if "pie" in q or "tỷ lệ" in q or "proportion" in q:
+    explicit = re.search(r"\(as an? (bar chart|line chart|pie chart|scatter plot)\)", q)
+    if explicit:  # loại biểu đồ do người dùng chọn/nêu rõ luôn được ưu tiên
+        chart_type = explicit.group(1).split()[0]
+    elif "pie" in q or "tỷ lệ" in q or "proportion" in q:
         chart_type = "pie"
     elif "line" in q or "trend" in q or "tháng" in q or "month" in q or "time" in q:
         chart_type = "line"

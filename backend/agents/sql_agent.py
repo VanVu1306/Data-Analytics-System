@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from backend.config import Settings
-from backend.llm import LLMClient
+from backend.llm import LLMClient, provider_label
 from backend.prompts import (
     CLARIFY_PREFIX,
     DATASET_SQL_SYSTEM_PROMPT,
@@ -65,7 +65,7 @@ class SQLAgent:
                 clarification = sql[len(CLARIFY_PREFIX):].strip() or "Vui lòng làm rõ câu hỏi."
             return SQLGeneration(sql=sql, prompt=prompt, source=self._llm.name, clarification=clarification)
         except Exception as e:
-            provider = {"openai": "OpenAI"}.get(self._llm.name, self._llm.name)
+            provider = provider_label(self._llm.name)
             return SQLGeneration(
                 sql=f"-- Error calling {provider}: {e}", prompt=prompt, source="error"
             )

@@ -54,7 +54,7 @@ def test_query_runs_on_selected_dataset_not_demo(env):
     client, _ = env()
     ds = _upload(client, "diem.csv", CSV_A)
     d = client.post("/api/query", json={"question": "xem", "dataset_id": ds, "use_mock_sql": True, "use_mock_viz": True}).json()
-    assert d["status"] == "ok" and d["sql"] == 'SELECT * FROM "diem" LIMIT 10'
+    assert d["status"] == "ok" and d["evidence"]["sql"] == 'SELECT * FROM "diem" LIMIT 10'
     assert d["table"]["columns"] == ["ten", "diem"] and len(d["table"]["rows"]) == 2
 
 
@@ -84,22 +84,24 @@ def test_prompt_uses_dataset_schema_without_sales_few_shot(env):
     client, _ = env(deepseek=ds_llm)
     ds = _upload(client, "diem.csv", CSV_A)
     d = client.post("/api/query", json={"question": "điểm trung bình", "dataset_id": ds, "use_mock_viz": True}).json()
-    assert d["status"] == "ok" and d["sql_source"] == "deepseek"
-    assert "CREATE TABLE diem" in d["sql_prompt"] and "diem" in d["sql_prompt"]
-    assert "orders" not in d["sql_prompt"] and "revenue" not in d["sql_prompt"]
+    assert d["status"] == "ok" and d["evidence"]["sql_source"] == "deepseek"
+    assert "CREATE TABLE diem" in d["evidence"]["sql_prompt"] and "diem" in d["evidence"]["sql_prompt"]
+    assert "orders" not in d["evidence"]["sql_prompt"] and "revenue" not in d["evidence"]["sql_prompt"]
     assert "FOREIGN KEY" in ds_llm.calls[0]["system"]  # luật JOIN nằm trong system prompt
+    assert "Thành phố Hồ Chí Minh" in ds_llm.calls[0]["system"]
+    assert "LIKE '%value%'" in ds_llm.calls[0]["system"]
 
 
 def test_demo_prompt_is_unchanged(env):
     client, _ = env(deepseek=FakeLLM(name="deepseek", response="SELECT 1"))
     d = client.post("/api/query", json={"question": "x"}).json()
-    assert "Some example questions" in d["sql_prompt"] and "CREATE TABLE orders" in d["sql_prompt"]
+    assert "Some example questions" in d["evidence"]["sql_prompt"] and "CREATE TABLE orders" in d["evidence"]["sql_prompt"]
 
 
 def test_declared_foreign_keys_and_confirmed_relations_reach_prompt(env, tmp_path):
     client, _ = env(deepseek=FakeLLM(name="deepseek", response="SELECT 1"))
     ds = _upload(client, "u.db", _sqlite_bytes(tmp_path))
-    prompt = lambda: client.post("/api/query", json={"question": "q", "dataset_id": ds}).json()["sql_prompt"]
+    prompt = lambda: client.post("/api/query", json={"question": "q", "dataset_id": ds}).json()["evidence"]["sql_prompt"]
     p = prompt()
     assert "FOREIGN KEY (khoa_id) REFERENCES khoa(id)" in p
     assert "REFERENCES sv" not in p  # ghi_chu.sv_ref chưa được xác nhận -> không có quan hệ
@@ -138,7 +140,7 @@ def test_clarification_instead_of_guessing_a_join(env, tmp_path):
     d = client.post("/api/query", json={"question": "ghi chú của từng sinh viên", "dataset_id": ds}).json()
     assert d["status"] == "needs_clarification"
     assert d["clarification"].startswith("Cột sv_ref")
-    assert d["table"] is None and d["viz_code"] is None
+    assert d["table"] is None and d["chart"]["code"] is None
 
 
 def test_unrelated_tables_can_be_queried_separately(env, tmp_path):
@@ -167,7 +169,7 @@ def test_only_read_queries_allowed_and_demo_untouched(env, demo_db, sql):
     before = hashlib.sha256(Path(demo_db).read_bytes()).hexdigest()
     client, c = env(deepseek=FakeLLM(name="deepseek", response=sql))
     d = client.post("/api/query", json={"question": "x"}).json()
-    assert d["status"] == "sql_error" and d["sql_error"]
+    assert d["status"] == "sql_error" and d["evidence"]["sql_error"]
     assert hashlib.sha256(Path(demo_db).read_bytes()).hexdigest() == before
     n, err = c.repo.execute("SELECT COUNT(*) AS n FROM orders")
     assert err is None and int(n["n"][0]) == 200
@@ -185,9 +187,9 @@ def test_row_limit_truncates_and_flags(env):
     client, _ = env(deepseek=FakeLLM(name="deepseek", response="SELECT * FROM orders"))
     client2, c = env(deepseek=FakeLLM(name="deepseek", response="SELECT * FROM orders"), query_max_rows=50)
     d = client2.post("/api/query", json={"question": "x", "use_mock_viz": True}).json()
-    assert d["truncated"] is True and len(d["table"]["rows"]) == 50
+    assert d["evidence"]["truncated"] is True and len(d["table"]["rows"]) == 50
     d = client.post("/api/query", json={"question": "x", "use_mock_viz": True}).json()
-    assert d["truncated"] is False and len(d["table"]["rows"]) == 200
+    assert d["evidence"]["truncated"] is False and len(d["table"]["rows"]) == 200
 
 
 def test_query_timeout(env):
@@ -208,7 +210,7 @@ def test_sql_error_on_dataset(env):
     client, _ = env(deepseek=FakeLLM(name="deepseek", response="SELECT cot_khong_co FROM diem"))
     ds = _upload(client, "diem.csv", CSV_A)
     d = client.post("/api/query", json={"question": "x", "dataset_id": ds}).json()
-    assert d["status"] == "sql_error" and "no such column" in d["sql_error"]
+    assert d["status"] == "sql_error" and "no such column" in d["evidence"]["sql_error"]
 
 
 def test_datasets_are_isolated_in_queries(env):
@@ -217,7 +219,7 @@ def test_datasets_are_isolated_in_queries(env):
     d2 = _upload(client, "b.csv", b"w\n2\n")
     assert client.post("/api/query", json={"question": "x", "dataset_id": d1, "use_mock_viz": True}).json()["status"] == "ok"
     r = client.post("/api/query", json={"question": "x", "dataset_id": d2, "use_mock_viz": True}).json()
-    assert r["status"] == "sql_error" and "no such table" in r["sql_error"]
+    assert r["status"] == "sql_error" and "no such table" in r["evidence"]["sql_error"]
 
 
 def test_special_table_names_are_quoted_in_schema(env):

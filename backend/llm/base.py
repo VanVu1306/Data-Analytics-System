@@ -10,6 +10,14 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 
+_LABELS = {"deepseek": "DeepSeek", "openai": "OpenAI"}
+
+
+def provider_label(name: str) -> str:
+    """Tên hiển thị của provider (dùng trong thông báo lỗi / ghi chú prompt)."""
+    return _LABELS.get(name, name)
+
+
 class LLMError(RuntimeError):
     """Lỗi khi gọi LLM (kế thừa RuntimeError để giữ tương thích hành vi cũ)."""
 

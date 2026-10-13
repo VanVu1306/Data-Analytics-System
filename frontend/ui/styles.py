@@ -25,6 +25,17 @@ CUSTOM_CSS = """
         padding:6px 12px; border-radius:4px;
         font-weight:600; font-size:14px; margin:8px 0;
     }
+
+    [data-testid="stChatMessage"] { scroll-margin-top: 4.5rem; }
+    .st-key-scroll_hook { position: absolute; height: 0; overflow: hidden; }
+
+    /* Bong bóng gợi ý câu hỏi phía trên ô nhập */
+    .st-key-suggestions button {
+        border-radius: 999px; padding: 4px 14px; font-size: 13px;
+        min-height: 0; line-height: 1.3; height: 100%;
+    }
+    .st-key-suggestions button p { white-space: normal; overflow: visible; text-overflow: clip; }
+    .st-key-suggestions [data-testid="stHorizontalBlock"] { gap: 0.5rem; }
 </style>
 """
 

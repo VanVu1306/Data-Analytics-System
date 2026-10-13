@@ -72,11 +72,17 @@ class DatasetResponse(BaseModel):
 
 
 # ── Query ──────────────────────────────────────────────────────────────────
+ChartHint = Literal["detect", "none", "auto", "bar chart", "line chart", "pie chart", "scatter plot"]
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1)
     dataset_id: Optional[str] = None      # None = demo DB; id sai -> 404 (không fallback)
-    chart_hint: str = "auto"              # auto | bar chart | line chart | pie chart | scatter plot
-    use_mock_sql: bool = False
+    # Tùy chọn phụ về biểu đồ. Mặc định "detect": chỉ vẽ khi câu hỏi yêu cầu.
+    # none = không vẽ; auto = vẽ và tự chọn loại; hoặc một loại cụ thể.
+    chart_hint: ChartHint = "detect"
+    show_sql: bool = False                # mở sẵn phần "Bằng chứng / SQL" (câu hỏi nhắc tới SQL cũng tự bật)
+    use_mock_sql: bool = False            # không gọi cloud LLM (SQL mẫu + câu trả lời mẫu)
     use_ollama: bool = True
     use_mock_viz: bool = False
     ollama_model: Optional[str] = None
@@ -87,22 +93,47 @@ class TableData(BaseModel):
     rows: List[List[Any]]
 
 
-class QueryResponse(BaseModel):
-    status: Literal["ok", "sql_error", "empty_result", "viz_error", "needs_clarification"]
-    question: str
-    full_question: str
-    # Stage 1
+class AnswerInfo(BaseModel):
+    """Câu trả lời text cho người dùng, chỉ dựa trên kết quả truy vấn."""
+
+    text: str
+    source: str                           # tên provider LLM | "template"
+    fallback_reason: Optional[str] = None  # vì sao dùng câu mẫu thay vì câu của LLM
+
+
+class Evidence(BaseModel):
+    """Bằng chứng: SQL đã thực thi + thông tin thực thi (không thay thế câu trả lời)."""
+
     sql: str
-    sql_prompt: str
     sql_source: str
-    clarification: Optional[str] = None
-    # Stage 2
+    sql_prompt: str
     sql_error: Optional[str] = None
-    table: Optional[TableData] = None
+    show_sql: bool = False                # gợi ý frontend mở sẵn phần bằng chứng
+    row_count: Optional[int] = None
+    column_count: Optional[int] = None
     truncated: bool = False
-    # Stage 3
-    viz_code: Optional[str] = None
-    viz_prompt: Optional[str] = None
-    viz_source: Optional[str] = None
-    viz_error: Optional[str] = None
-    chart_png_base64: Optional[str] = None
+    elapsed_ms: Optional[int] = None
+
+
+class ChartResult(BaseModel):
+    """Kết quả nhánh biểu đồ, tách riêng khỏi truy vấn: lỗi ở đây không ảnh hưởng answer/table."""
+
+    status: Literal["not_requested", "ok", "error"] = "not_requested"
+    requested_by: Literal["none", "option", "prompt"] = "none"
+    chart_type: Optional[str] = None      # None = tự chọn
+    png_base64: Optional[str] = None
+    error: Optional[str] = None
+    code: Optional[str] = None
+    prompt: Optional[str] = None
+    source: Optional[str] = None
+
+
+class QueryResponse(BaseModel):
+    # Trạng thái của phần truy vấn/trả lời. Trạng thái biểu đồ nằm ở `chart.status`.
+    status: Literal["ok", "sql_error", "empty_result", "needs_clarification"]
+    question: str
+    answer: Optional[AnswerInfo] = None   # có khi truy vấn thành công (kể cả kết quả rỗng)
+    clarification: Optional[str] = None
+    table: Optional[TableData] = None
+    evidence: Evidence
+    chart: ChartResult

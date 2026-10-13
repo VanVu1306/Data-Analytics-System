@@ -63,14 +63,14 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 3 — Kết quả text, bằng chứng bảng và biểu đồ theo yêu cầu
 
-- [ ] Giữ trải nghiệm **một chatbot / một ô nhập prompt**: người dùng hỏi dữ liệu bằng ngôn ngữ tự nhiên, không phải chọn trước chế độ “Hỏi đáp”, “SQL” hay “Biểu đồ”.
-- [ ] Với câu hỏi dữ liệu, mặc định chạy luồng `câu hỏi → sinh SQL → thực thi trên dataset đã chọn → trả lời text ngắn + bảng kết quả`. Không chỉ hiển thị SQL/code truy vấn làm phản hồi chính.
-- [ ] Hiển thị câu trả lời text và bảng kết quả trực tiếp, không suy diễn hoặc đưa số liệu không có trong kết quả. Đưa SQL đã thực thi vào phần **“Bằng chứng / SQL”** có thể mở rộng.
-- [ ] Xem “phân tích bằng SQL” là cùng luồng hỏi đáp, không tạo một tool/chế độ độc lập chỉ để chạy SQL. Khi người dùng yêu cầu SQL hoặc bật tùy chọn tương ứng, mở/hiển thị SQL và các thông tin thực thi liên quan.
-- [ ] Xem biểu đồ là một nhánh/bước tùy chọn sau khi đã có kết quả truy vấn: nhận biết yêu cầu vẽ trong prompt, đồng thời cung cấp lựa chọn phụ “Không vẽ / Tự chọn / loại biểu đồ cụ thể”. Mặc định không vẽ nếu người dùng không yêu cầu.
-- [ ] Nếu bước tạo/render biểu đồ thất bại, vẫn trả câu trả lời text và bảng đã truy vấn thành công; thể hiện lỗi biểu đồ riêng.
-- [ ] Mở rộng hợp đồng API để phân biệt kết quả truy vấn, câu trả lời text, SQL/bằng chứng, trạng thái làm rõ và kết quả/lỗi biểu đồ; các trường SQL/code/prompt nội bộ không thay thế câu trả lời cho người dùng.
-- [ ] Kiểm thử: trả lời text khớp kết quả; SQL chỉ hiện khi được yêu cầu hoặc mở phần bằng chứng; câu hỏi có/không yêu cầu biểu đồ; loại biểu đồ cụ thể; truy vấn lỗi/rỗng; cần làm rõ; biểu đồ lỗi nhưng vẫn giữ bảng và text.
+- [X] Giữ trải nghiệm **một chatbot / một ô nhập prompt**: người dùng hỏi dữ liệu bằng ngôn ngữ tự nhiên, không phải chọn trước chế độ “Hỏi đáp”, “SQL” hay “Biểu đồ”.
+- [X] Với câu hỏi dữ liệu, mặc định chạy luồng `câu hỏi → sinh SQL → thực thi trên dataset đã chọn → trả lời text ngắn + bảng kết quả`. Không chỉ hiển thị SQL/code truy vấn làm phản hồi chính.
+- [X] Hiển thị câu trả lời text và bảng kết quả trực tiếp, không suy diễn hoặc đưa số liệu không có trong kết quả. Đưa SQL đã thực thi vào phần **“Bằng chứng / SQL”** có thể mở rộng.
+- [X] Xem “phân tích bằng SQL” là cùng luồng hỏi đáp, không tạo một tool/chế độ độc lập chỉ để chạy SQL. Khi người dùng yêu cầu SQL hoặc bật tùy chọn tương ứng, mở/hiển thị SQL và các thông tin thực thi liên quan.
+- [X] Xem biểu đồ là một nhánh/bước tùy chọn sau khi đã có kết quả truy vấn: nhận biết yêu cầu vẽ trong prompt, đồng thời cung cấp lựa chọn phụ “Không vẽ / Tự chọn / loại biểu đồ cụ thể”. Mặc định không vẽ nếu người dùng không yêu cầu.
+- [X] Nếu bước tạo/render biểu đồ thất bại, vẫn trả câu trả lời text và bảng đã truy vấn thành công; thể hiện lỗi biểu đồ riêng.
+- [X] Mở rộng hợp đồng API để phân biệt kết quả truy vấn, câu trả lời text, SQL/bằng chứng, trạng thái làm rõ và kết quả/lỗi biểu đồ; các trường SQL/code/prompt nội bộ không thay thế câu trả lời cho người dùng.
+- [X] Kiểm thử: trả lời text khớp kết quả; SQL chỉ hiện khi được yêu cầu hoặc mở phần bằng chứng; câu hỏi có/không yêu cầu biểu đồ; loại biểu đồ cụ thể; truy vấn lỗi/rỗng; cần làm rõ; biểu đồ lỗi nhưng vẫn giữ bảng và text.
 
 **Thành phần dự kiến**
 
