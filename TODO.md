@@ -63,10 +63,9 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 3 — Kết quả text, bằng chứng bảng và biểu đồ theo yêu cầu
 
-- [ ] Bảo đảm API/UI trả lời text ngắn dựa trên kết quả truy vấn; không khẳng định số liệu không có trong kết quả.
+- [ ] Bổ sung trả lời text ngắn cho kết quả truy vấn (hiện tại nhập prompt --> hiện trực tiếp SQL); không khẳng định số liệu không có trong kết quả.
 - [ ] Hiển thị SQL đã thực thi và bảng kết quả làm bằng chứng cho câu trả lời.
 - [ ] Cho phép người dùng chọn không vẽ, tự chọn loại biểu đồ hoặc yêu cầu loại biểu đồ cụ thể.
-- [ ] Tiến tới chuyển đổi thao tác của người dùng sang hết dạng text (người dùng hỏi đáp và yêu cầu vẽ biểu đồ, truy vấn qua prompt)
 - [ ] Chỉ chạy `VizAgent`/`RenderChartTool` khi biểu đồ được yêu cầu; tái sử dụng phần vẽ hiện tại nếu phù hợp.
 - [ ] Nếu tạo biểu đồ lỗi, vẫn giữ câu trả lời và bảng dữ liệu đã truy vấn thành công.
 - [ ] Kiểm thử trường hợp câu trả lời có kết quả, không có dữ liệu, truy vấn lỗi, biểu đồ không được yêu cầu và biểu đồ lỗi.
@@ -90,6 +89,10 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 - [ ] Không ghi dữ liệu nhạy cảm vào log hoặc gửi toàn bộ dữ liệu lên LLM khi không cần thiết; chỉ gửi schema và lượng mẫu tối thiểu phù hợp.
 - [ ] Cập nhật README về định dạng được hỗ trợ, quy tắc chuẩn hóa, giới hạn, chính sách lưu/xóa và cách sử dụng chức năng upload.
 - [ ] Chạy các kiểm thử backend/API và kiểm tra thủ công luồng hoàn chỉnh trên UI.
+
+## Mở rộng — Nếu được yêu cầu
+
+- [ ] Tạo luồng điều phối LangGraph để agent hóa toàn bộ hệ thống.
 
 ## Tiêu chí hoàn thành MVP
 
