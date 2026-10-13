@@ -83,7 +83,45 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 **Phạm vi kiến trúc:** chưa cần LangGraph cho luồng MVP này.
 
-## Giai đoạn 4 — Quản lý dataset và quan hệ
+## Giai đoạn 4 — Bổ sung khả năng thực hiện EDA
+
+- [ ] **Giữ nguyên SQLite làm định dạng lưu trữ chuẩn.** Không cần đổi database để hỗ trợ EDA: dùng SQL aggregate cho thống kê phù hợp, và pandas trên kết quả/mẫu có giới hạn cho phép tính khó biểu đạt bằng SQL.
+- [ ] Rà soát import ở `backend/database/importers/`: thống nhất xử lý NULL/rỗng, kiểu dữ liệu hỗn hợp, số và ngày tháng; lưu kiểu nguồn/kiểu suy luận và cảnh báo import để EDA không hiểu nhầm dữ liệu đã chuẩn hóa.
+- [ ] Mở rộng orchestrator bằng **kế hoạch xử lý có cấu trúc**, tối thiểu gồm danh sách operation, bảng/cột mục tiêu đã xác thực, yêu cầu biểu đồ và yêu cầu hiển thị SQL.
+- [ ] Định tuyến bằng quy tắc cho ý định rõ ràng và LLM trả kế hoạch có schema cho câu hỏi phức tạp/kết hợp. Kiểm tra operation, tên bảng/cột và tham số với schema/allowlist trước khi chạy; kế hoạch không hợp lệ hoặc mơ hồ thì hỏi lại người dùng.
+- [ ] Cho phép query và EDA phối hợp trong cùng một lượt, không coi EDA là chatbot riêng:
+
+  - [ ] Câu hỏi cần một kết quả cụ thể (ví dụ doanh thu theo tháng) → `query`.
+  - [ ] Tổng quan/chất lượng/phân phối dữ liệu → operation EDA tương ứng.
+  - [ ] Câu hỏi kết hợp → chạy một hoặc nhiều operation cần thiết rồi hợp nhất phản hồi.
+  - [ ] Không chạy full-profile EDA cho mỗi truy vấn đơn giản.
+- [ ] Xây dựng các EDA tool xác định, có giới hạn; không cho LLM tự sinh và thực thi code phân tích tùy ý:
+
+  - [ ] Tổng quan bảng: số dòng/cột, kiểu dữ liệu và số giá trị phân biệt.
+  - [ ] Chất lượng: giá trị thiếu/NULL và dòng trùng lặp (định nghĩa duplicate phải rõ).
+  - [ ] Cột số: count, mean, std, min, quartiles/median và max.
+  - [ ] Cột phân loại: số nhóm và top values có giới hạn.
+  - [ ] Tương quan giữa các cột số khi số lượng cột phù hợp; nêu rõ loại tương quan và cách xử lý NULL.
+- [ ] Đặt timeout, giới hạn số cột/nhóm/sample; ghi kết quả là exact hay sampled/truncated. Ưu tiên SQL cho count/mean/min/max/group-by; chỉ đưa dữ liệu đã giới hạn sang pandas cho quartile/tương quan hoặc phép tính cần thiết.
+- [ ] Trả payload EDA có cấu trúc (operation, bảng/cột, số liệu, warnings, sampling/truncation); tạo câu trả lời text ngắn chỉ từ các kết quả này và hiển thị trong luồng chat cùng bảng/bằng chứng. SQL truy vấn ở expander khi người dùng yêu cầu hoặc bật tùy chọn.
+- [ ] Kiểm thử planner/validator và từng tool: schema khác nhau, bảng rỗng/lớn, NULL/duplicate, kiểu dữ liệu hỗn hợp, giới hạn/sample, cột không tồn tại, câu hỏi mơ hồ và câu hỏi phối hợp query + EDA.
+
+**Thành phần dự kiến:** importer/metadata trong `backend/database/importers/` và `backend/database/dataset_store.py`; EDA tools trong `backend/tools/` (hoặc `backend/analysis/`) đăng ký tại `backend/container.py`; planner/validator trong `backend/tools/intent.py` hoặc module riêng; điều phối trong `backend/pipeline/orchestrator.py`; response trong `backend/api/schemas.py`/`backend/api/routes.py`; hiển thị chung trong `frontend/api_client.py`/`frontend/ui/main_view.py`.
+
+## Giai đoạn 5 — Mở rộng loại biểu đồ và chọn biểu đồ phù hợp
+
+- [ ] Dùng chung kết quả query/EDA làm đầu vào vẽ; không tạo luồng chatbot/phân tích độc lập và không tải toàn bộ bảng lớn chỉ để vẽ.
+- [ ] Bổ sung histogram/KDE cho phân phối, box plot/violin plot cho phân phối/ngoại lệ, heatmap cho tương quan và count plot cho tần suất nhóm.
+- [ ] Chọn chart theo mục tiêu và kiểu dữ liệu (so sánh, xu hướng, phân phối, quan hệ, thành phần), không chỉ dựa vào từ khóa hoặc mặc định bar chart.
+- [ ] Giữ yêu cầu chart trong prompt; tùy chọn phụ “không vẽ / tự chọn / loại cụ thể” được ưu tiên theo hợp đồng API hiện tại, không bắt người dùng chọn chế độ trước khi chat.
+- [ ] Chuẩn bị dữ liệu chart bằng SQL aggregate hoặc sample có giới hạn; ghi số dòng gốc, số dòng dùng và phương pháp aggregate/sample.
+- [ ] Hiển thị tiêu đề, nhãn trục, đơn vị nếu biết và cảnh báo về sample/truncation hoặc dữ liệu không phù hợp với chart.
+- [ ] Ưu tiên renderer/hàm vẽ xác định với loại chart trong allowlist. Nếu tiếp tục chạy code do LLM sinh, xử lý rủi ro thực thi tại `backend/tools/viz_tools.py` trước khi dùng trên dữ liệu người dùng.
+- [ ] Kiểm thử từng chart với dữ liệu thiếu/ít điểm/cột không phù hợp/dữ liệu lớn/yêu cầu mâu thuẫn; lỗi chart không làm mất câu trả lời, bảng query hoặc kết quả EDA.
+
+**Thành phần dự kiến:** mở rộng chart planner trong `backend/tools/intent.py`; renderer có kiểm soát trong `backend/tools/`; chuẩn bị dữ liệu từ kết quả query/EDA; cập nhật response/hiển thị trong `backend/api/schemas.py`, `backend/api/routes.py`, `frontend/api_client.py` và `frontend/ui/main_view.py`.
+
+## Giai đoạn 6 — Quản lý dataset và quan hệ
 
 - [ ] Thêm API xem danh sách dataset nếu chính sách lưu trữ cho phép.
 - [ ] Thêm API xem schema/preview dữ liệu của dataset, giới hạn số dòng trả về.
@@ -93,7 +131,7 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 - [ ] Nếu chưa có tài khoản người dùng, xác định rõ dataset thuộc phiên nào và cách cô lập giữa các phiên; nếu có đăng nhập, kiểm tra quyền sở hữu ở mọi endpoint.
 - [ ] Kiểm thử truy cập chéo dataset/phiên bị từ chối và thao tác xóa không ảnh hưởng dataset khác.
 
-## Giai đoạn 5 — Hoàn thiện, an toàn và tài liệu
+## Giai đoạn 7 — Hoàn thiện, an toàn và tài liệu
 
 - [ ] Không tin cậy tên tệp, MIME type, `dataset_id` hoặc đường dẫn do client gửi.
 - [ ] Đặt giới hạn upload/import/truy vấn; không thực thi `.sql` script tùy ý trên môi trường ứng dụng.
