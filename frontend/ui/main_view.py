@@ -18,8 +18,8 @@ from frontend.ui.styles import step_label
 def render_header() -> None:
     st.title("📊 NL2Viz — Natural Language to Visualization")
     st.caption(
-        "Pipeline: Câu hỏi → **DAIL-SQL** (DeepSeek) → SQL → DataFrame → "
-        "**Text-to-Python** (Ollama Llama3 local) → Biểu đồ"
+        "Pipeline: Câu hỏi → **Cloud LLM** → SQL → DataFrame → "
+        "**Text-to-Python** (Ollama local hoặc cloud fallback) → Biểu đồ"
     )
     st.caption("Upload CSV / Excel / SQLite của bạn, chọn dataset ở sidebar rồi đặt câu hỏi bằng ngôn ngữ tự nhiên.")
 
@@ -110,11 +110,14 @@ def render_results(result: QueryResult, state: SidebarState) -> None:
     m1, m2, m3 = st.columns(3)
     m1.metric("Rows returned", len(df))
     m2.metric("Columns", len(df.columns))
+    cloud_label = "OpenAI GPT" if state.llm_provider == "openai" else "DeepSeek"
     m3.metric(
         "Mode",
         "Llama3 Local"
         if (state.viz_use_ollama and state.ollama_running and not state.viz_use_mock)
-        else ("DeepSeek" if (state.has_deepseek_key and not state.viz_use_mock) else "Mock"),
+        else (
+            cloud_label if state.has_cloud_llm_key and not state.viz_use_mock else "Mock"
+        ),
     )
 
 
@@ -123,7 +126,7 @@ def render_intro() -> None:
 
     with st.expander("📖 Architecture overview"):
         st.markdown("""
-**Stage 1 — DAIL-SQL (DeepSeek API)**
+**Stage 1 — DAIL-SQL (Cloud LLM: DeepSeek hoặc OpenAI theo cấu hình)**
 - Code Representation Prompt (CRP)
 - Few-shot examples với Q+SQL pairs
 - Output: SQL query

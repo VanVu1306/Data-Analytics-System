@@ -51,10 +51,13 @@ class Settings:
     # ── Database ───────────────────────────────────────────────────────────
     db_path: str
 
-    # ── DeepSeek (Stage 1: SQL; fallback cho Stage 3) ──────────────────────
+    # ── Cloud LLM (Stage 1: SQL; fallback cho Stage 3) ─────────────────────
+    llm_provider: str
     deepseek_api_key: str
     deepseek_base_url: str
     deepseek_model: str
+    openai_api_key: str
+    openai_model: str
     sql_temperature: float
     sql_max_tokens: int
     viz_cloud_temperature: float
@@ -84,15 +87,24 @@ class Settings:
     def has_deepseek_key(self) -> bool:
         return bool(self.deepseek_api_key)
 
+    @property
+    def has_cloud_llm_key(self) -> bool:
+        if self.llm_provider == "openai":
+            return bool(self.openai_api_key)
+        return bool(self.deepseek_api_key)
+
 
 def load_settings() -> Settings:
     """Đọc .env (nếu có) rồi dựng Settings từ biến môi trường."""
     _load_env_file(PROJECT_ROOT / ".env")
     return Settings(
         db_path=_env_str("NL2VIZ_DB_PATH", str(PROJECT_ROOT / "demo_db" / "sales_demo.db")),
+        llm_provider=_env_str("LLM_PROVIDER", "deepseek").strip().lower(),
         deepseek_api_key=_env_str("DEEPSEEK_API_KEY", ""),
         deepseek_base_url=_env_str("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         deepseek_model=_env_str("DEEPSEEK_MODEL", "deepseek-chat"),
+        openai_api_key=_env_str("OPENAI_API_KEY", ""),
+        openai_model=_env_str("OPENAI_MODEL", "gpt-5.6"),
         sql_temperature=_env_float("SQL_TEMPERATURE", 0.0),
         sql_max_tokens=_env_int("SQL_MAX_TOKENS", 512),
         viz_cloud_temperature=_env_float("VIZ_CLOUD_TEMPERATURE", 0.1),

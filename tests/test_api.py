@@ -28,7 +28,8 @@ def test_health_and_schema_and_models(client_for):
     assert h == {
         "status": "ok",
         "db_exists": True,
-        "deepseek_configured": False,
+        "llm_provider": "deepseek",
+        "llm_configured": False,
         "ollama_running": True,
         "ollama_default_model": "llama3.2",
         "max_upload_mb": 50,

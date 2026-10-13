@@ -6,12 +6,12 @@ VizAgent (Stage 3 — Local-Python-Viz): câu hỏi + DataFrame -> code matplotl
 Chuỗi fallback (giữ nguyên hành vi bản gốc):
     mock?            -> mock code
     use_ollama:
-        Ollama chạy  -> Llama3 local
+        Ollama chạy  -> model local
                           code hợp lệ        -> dùng
                           code không hợp lệ  -> mock
-                          lỗi gọi Ollama     -> DeepSeek (nếu có key) -> mock
-        Ollama không chạy                    -> DeepSeek (nếu có key) -> mock
-    ngược lại        -> DeepSeek (nếu có key) -> mock
+                          lỗi gọi Ollama     -> cloud provider (nếu có key) -> mock
+        Ollama không chạy                    -> cloud provider (nếu có key) -> mock
+    ngược lại        -> cloud provider (nếu có key) -> mock
 
 Agent chỉ SINH code; việc chạy code do tool `render_chart` đảm nhiệm.
 """
@@ -76,22 +76,22 @@ class VizAgent:
                     err_msg = f"\n\n[Ollama error: {e}]"
                     return self._cloud_or_mock(
                         df, question, prompt, err_msg,
-                        cloud_suffix=" → fallback DeepSeek",
+                        cloud_suffix=f" → fallback {self._cloud.name}",
                         mock_suffix=" → fallback Mock",
                     )
             err_msg = "\n\n[Ollama server not running at localhost:11434]"
             return self._cloud_or_mock(
                 df, question, prompt, err_msg,
-                cloud_suffix=" → using DeepSeek",
+                cloud_suffix=f" → using {self._cloud.name}",
                 mock_suffix=" → using Mock",
             )
 
-        # Dùng DeepSeek trực tiếp
+        # Dùng cloud provider trực tiếp
         if self._cloud.is_available():
             try:
                 return VizCodeGeneration(self._cloud_code(prompt), prompt, self._cloud.name)
             except Exception as e:
-                return self._mock(df, question, f"{prompt}\n\n[DeepSeek error: {e}]")
+                return self._mock(df, question, f"{prompt}\n\n[{self._cloud.name} error: {e}]")
 
         return self._mock(df, question, prompt)
 

@@ -23,7 +23,8 @@ class APIError(RuntimeError):
 class Health:
     max_upload_mb: int
     db_exists: bool
-    deepseek_configured: bool
+    llm_provider: str
+    llm_configured: bool
     ollama_running: bool
     ollama_default_model: str
 
@@ -87,7 +88,8 @@ class NL2VizClient:
         return Health(
             max_upload_mb=d.get("max_upload_mb", 50),
             db_exists=d["db_exists"],
-            deepseek_configured=d["deepseek_configured"],
+            llm_provider=d["llm_provider"],
+            llm_configured=d["llm_configured"],
             ollama_running=d["ollama_running"],
             ollama_default_model=d["ollama_default_model"],
         )

@@ -39,6 +39,12 @@ def test_sql_agent_llm_error_returns_comment(make_container):
     assert gen.sql == "-- Error calling DeepSeek: quota" and gen.source == "error"
 
 
+def test_sql_agent_error_uses_configured_provider_name(make_container):
+    c = make_container(deepseek=FakeLLM(name="openai", raises=RuntimeError("quota")))
+    gen = c.sql_agent.generate("x")
+    assert gen.sql == "-- Error calling OpenAI: quota" and gen.source == "error"
+
+
 # ── VizAgent ────────────────────────────────────────────────────────────────
 
 def test_viz_agent_mock_flag(make_container):

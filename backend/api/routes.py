@@ -90,7 +90,8 @@ def health(container: Container = Depends(get_container)) -> HealthResponse:
     return HealthResponse(
         status="ok",
         db_exists=container.repo.exists(),
-        deepseek_configured=container.settings.has_deepseek_key,
+        llm_provider=container.cloud_llm.name,
+        llm_configured=container.cloud_llm.is_available(),
         ollama_running=container.ollama.is_available(),
         ollama_default_model=container.ollama.default_model,
         max_upload_mb=container.settings.max_upload_mb,

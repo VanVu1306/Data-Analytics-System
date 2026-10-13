@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     status: str
     db_exists: bool
-    deepseek_configured: bool
+    llm_provider: str
+    llm_configured: bool
     ollama_running: bool
     ollama_default_model: str
     max_upload_mb: int = 50

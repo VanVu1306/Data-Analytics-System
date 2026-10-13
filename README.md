@@ -127,7 +127,7 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 | Method | Path                                     | Mô tả                                                                                                                                              |
 | ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/health`                          | `db_exists`, `deepseek_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                              |
+| GET    | `/api/health`                          | `db_exists`, `llm_provider`, `llm_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                 |
 | GET    | `/api/schema?dataset_id=`              | `{tables: {tên_bảng: [cột...]}, relations: [...]}`; bỏ `dataset_id` = demo DB (503 nếu chưa tạo)                                          |
 | GET    | `/api/models`                          | Model Ollama đã pull + model mặc định                                                                                                           |
 | POST   | `/api/datasets`                        | Upload (multipart`file`): CSV / `.xlsx` / `.db` `.sqlite` → `201` + `dataset_id`, bảng, số dòng, cảnh báo                          |
@@ -144,24 +144,28 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 Đọc từ biến môi trường hoặc file `.env` ở thư mục gốc (biến môi trường thật được ưu tiên). Giá trị mặc định = giá trị của bản cũ.
 
-| Biến                                                     | Mặc định                                      | Ý nghĩa                                                                     |
-| --------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `DEEPSEEK_API_KEY`                                      | *(rỗng)*                                      | Rỗng → Stage 1 chạy mock SQL                                               |
-| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                | `https://api.deepseek.com` / `deepseek-chat` |                                                                               |
-| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                  | `0` / `512`                                  | Stage 1                                                                       |
-| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`      | `0.1` / `800`                                | Stage 3 khi dùng DeepSeek                                                    |
-| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                    | `http://127.0.0.1:11434` / `llama3.2`        |                                                                               |
-| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                | `120` / `512`                                |                                                                               |
-| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                 | `0.1` / `0.9`                                |                                                                               |
-| `NL2VIZ_DB_PATH`                                        | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                     |
-| `NL2VIZ_DATASET_DIR`                                    | `data/datasets`                                | Nơi lưu dataset upload                                                      |
-| `NL2VIZ_MAX_UPLOAD_MB`                                  | `50`                                           | Giới hạn kích thước tệp upload                                          |
-| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE` | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                             |
-| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`      | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                       |
-| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                       | `3` / `100`                                  | Số dòng mẫu trong prompt Stage 3 / DPI ảnh                                |
-| `NL2VIZ_API_URL`                                        | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit` |
+| Biến                                                     | Mặc định                                      | Ý nghĩa                                                                                         |
+| --------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`                                          | `deepseek`                                     | Chọn cloud provider:`deepseek` hoặc `openai`                                                |
+| `DEEPSEEK_API_KEY`                                      | *(rỗng)*                                      | Dùng khi`LLM_PROVIDER=deepseek`; rỗng → Stage 1 chạy mock SQL                               |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                | `https://api.deepseek.com` / `deepseek-chat` | DeepSeek endpoint và model                                                                       |
+| `OPENAI_API_KEY` / `OPENAI_MODEL`                     | *(rỗng)* / `gpt-5.6`                        | Dùng khi`LLM_PROVIDER=openai`; client gửi giới hạn đầu ra bằng `max_completion_tokens` |
+| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                  | `0` / `512`                                  | Stage 1                                                                                           |
+| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`      | `0.1` / `800`                                | Stage 3 khi dùng cloud provider                                                                  |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                    | `http://127.0.0.1:11434` / `llama3.2`        |                                                                                                   |
+| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                | `120` / `512`                                |                                                                                                   |
+| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                 | `0.1` / `0.9`                                |                                                                                                   |
+| `NL2VIZ_DB_PATH`                                        | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                                         |
+| `NL2VIZ_DATASET_DIR`                                    | `data/datasets`                                | Nơi lưu dataset upload                                                                          |
+| `NL2VIZ_MAX_UPLOAD_MB`                                  | `50`                                           | Giới hạn kích thước tệp upload                                                              |
+| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE` | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                                                 |
+| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`      | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                                           |
+| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                       | `3` / `100`                                  | Số dòng mẫu trong prompt Stage 3 / DPI ảnh                                                    |
+| `NL2VIZ_API_URL`                                        | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit`                     |
 
 Dùng model Ollama tùy chỉnh: `ollama create llama3-fast -f scripts/Modelfile_llama3`, rồi đặt `OLLAMA_MODEL=llama3-fast`.
+
+Đổi cloud provider sang OpenAI bằng cách đặt `LLM_PROVIDER=openai`, cấu hình `OPENAI_API_KEY` và `OPENAI_MODEL` trong `.env`, sau đó khởi động lại backend. Chuyển về DeepSeek bằng `LLM_PROVIDER=deepseek`. Cả SQLAgent và fallback cloud của VizAgent dùng cùng provider được chọn; Ollama vẫn là lựa chọn local cho tạo biểu đồ.
 
 ---
 
@@ -175,7 +179,7 @@ python -m venv venv && source venv/bin/activate      # Windows: .\venv\Scripts\A
 pip install -r requirements.txt
 
 python scripts/create_demo_db.py                      # tạo demo_db/sales_demo.db (bắt buộc, lần đầu)
-cp .env.example .env                                  # rồi điền DEEPSEEK_API_KEY (tùy chọn)
+cp .env.example .env                                  # chọn LLM_PROVIDER và điền API key tương ứng
 
 # Tùy chọn: Ollama cho Stage 3 local
 bash scripts/setup_ollama.sh                          # Windows: .\scripts\setup_ollama.ps1

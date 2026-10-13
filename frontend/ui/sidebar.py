@@ -22,7 +22,8 @@ class SidebarState:
     viz_use_mock: bool
     ollama_model: Optional[str]
     ollama_running: bool
-    has_deepseek_key: bool
+    llm_provider: str
+    has_cloud_llm_key: bool
     dataset_id: Optional[str] = None  # None = demo DB
     tables: Optional[List[str]] = None  # None = không có dataset nào để hỏi
 
@@ -42,20 +43,22 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
 
         st.divider()
 
-        # ── Stage 1: DAIL-SQL (DeepSeek) ──────────────────────────────────
-        st.subheader("🔮 Stage 1: DAIL-SQL")
-        if health.deepseek_configured:
+        # ── Stage 1: SQL generation ──────────────────────────────────────
+        provider_label = "OpenAI GPT" if health.llm_provider == "openai" else "DeepSeek"
+        st.subheader(f"🔮 Stage 1: SQL ({provider_label})")
+        if health.llm_configured:
             st.markdown(
-                '<span class="badge-real">🟢 DeepSeek API connected</span>',
+                f'<span class="badge-real">🟢 {provider_label} API configured</span>',
                 unsafe_allow_html=True,
             )
             sql_use_mock = st.checkbox("Use mock SQL (debugging)", value=False)
         else:
             st.markdown(
-                '<span class="badge-mock">🟡 No DeepSeek key — mock mode</span>',
+                f'<span class="badge-mock">🟡 No {provider_label} key — mock mode</span>',
                 unsafe_allow_html=True,
             )
-            st.caption("Set DEEPSEEK_API_KEY env var to enable real DAIL-SQL.")
+            key_name = "OPENAI_API_KEY" if health.llm_provider == "openai" else "DEEPSEEK_API_KEY"
+            st.caption(f"Set {key_name} env var to enable cloud SQL generation.")
             sql_use_mock = True
 
         st.divider()
@@ -88,8 +91,8 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
             )
             st.caption("Start: `ollama serve` (terminal khác)")
             viz_use_ollama = False
-            if health.deepseek_configured:
-                st.info("Sẽ dùng DeepSeek làm fallback")
+            if health.llm_configured:
+                st.info(f"Sẽ dùng {provider_label} làm fallback")
 
         viz_use_mock = st.checkbox("Use mock Viz code (debugging)", value=False)
 
@@ -117,7 +120,8 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
         viz_use_mock=viz_use_mock,
         ollama_model=ollama_model,
         ollama_running=health.ollama_running,
-        has_deepseek_key=health.deepseek_configured,
+        llm_provider=health.llm_provider,
+        has_cloud_llm_key=health.llm_configured,
         dataset_id=dataset_id,
         tables=tables,
     )

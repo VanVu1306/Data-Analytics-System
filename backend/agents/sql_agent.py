@@ -3,7 +3,7 @@ backend/agents/sql_agent.py
 ---------------------------
 SQLAgent (Stage 1 — DAIL-SQL): câu hỏi tự nhiên -> câu SQL.
 
-Agent điều phối: tool `get_schema` -> prompts -> LLM (DeepSeek) -> làm sạch SQL.
+Agent điều phối: tool `get_schema` -> prompts -> cloud LLM -> làm sạch SQL.
 Không có key / chọn mock -> tool `mock_sql`.
 """
 from __future__ import annotations
@@ -65,4 +65,7 @@ class SQLAgent:
                 clarification = sql[len(CLARIFY_PREFIX):].strip() or "Vui lòng làm rõ câu hỏi."
             return SQLGeneration(sql=sql, prompt=prompt, source=self._llm.name, clarification=clarification)
         except Exception as e:
-            return SQLGeneration(sql=f"-- Error calling DeepSeek: {e}", prompt=prompt, source="error")
+            provider = {"openai": "OpenAI"}.get(self._llm.name, self._llm.name)
+            return SQLGeneration(
+                sql=f"-- Error calling {provider}: {e}", prompt=prompt, source="error"
+            )
