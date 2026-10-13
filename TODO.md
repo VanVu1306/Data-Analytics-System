@@ -63,14 +63,25 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 3 — Kết quả text, bằng chứng bảng và biểu đồ theo yêu cầu
 
-- [ ] Bổ sung trả lời text ngắn cho kết quả truy vấn (hiện tại nhập prompt --> hiện trực tiếp SQL); không khẳng định số liệu không có trong kết quả.
-- [ ] Hiển thị SQL đã thực thi và bảng kết quả làm bằng chứng cho câu trả lời.
-- [ ] Cho phép người dùng chọn không vẽ, tự chọn loại biểu đồ hoặc yêu cầu loại biểu đồ cụ thể.
-- [ ] Chỉ chạy `VizAgent`/`RenderChartTool` khi biểu đồ được yêu cầu; tái sử dụng phần vẽ hiện tại nếu phù hợp.
-- [ ] Nếu tạo biểu đồ lỗi, vẫn giữ câu trả lời và bảng dữ liệu đã truy vấn thành công.
-- [ ] Kiểm thử trường hợp câu trả lời có kết quả, không có dữ liệu, truy vấn lỗi, biểu đồ không được yêu cầu và biểu đồ lỗi.
+- [ ] Giữ trải nghiệm **một chatbot / một ô nhập prompt**: người dùng hỏi dữ liệu bằng ngôn ngữ tự nhiên, không phải chọn trước chế độ “Hỏi đáp”, “SQL” hay “Biểu đồ”.
+- [ ] Với câu hỏi dữ liệu, mặc định chạy luồng `câu hỏi → sinh SQL → thực thi trên dataset đã chọn → trả lời text ngắn + bảng kết quả`. Không chỉ hiển thị SQL/code truy vấn làm phản hồi chính.
+- [ ] Hiển thị câu trả lời text và bảng kết quả trực tiếp, không suy diễn hoặc đưa số liệu không có trong kết quả. Đưa SQL đã thực thi vào phần **“Bằng chứng / SQL”** có thể mở rộng.
+- [ ] Xem “phân tích bằng SQL” là cùng luồng hỏi đáp, không tạo một tool/chế độ độc lập chỉ để chạy SQL. Khi người dùng yêu cầu SQL hoặc bật tùy chọn tương ứng, mở/hiển thị SQL và các thông tin thực thi liên quan.
+- [ ] Xem biểu đồ là một nhánh/bước tùy chọn sau khi đã có kết quả truy vấn: nhận biết yêu cầu vẽ trong prompt, đồng thời cung cấp lựa chọn phụ “Không vẽ / Tự chọn / loại biểu đồ cụ thể”. Mặc định không vẽ nếu người dùng không yêu cầu.
+- [ ] Nếu bước tạo/render biểu đồ thất bại, vẫn trả câu trả lời text và bảng đã truy vấn thành công; thể hiện lỗi biểu đồ riêng.
+- [ ] Mở rộng hợp đồng API để phân biệt kết quả truy vấn, câu trả lời text, SQL/bằng chứng, trạng thái làm rõ và kết quả/lỗi biểu đồ; các trường SQL/code/prompt nội bộ không thay thế câu trả lời cho người dùng.
+- [ ] Kiểm thử: trả lời text khớp kết quả; SQL chỉ hiện khi được yêu cầu hoặc mở phần bằng chứng; câu hỏi có/không yêu cầu biểu đồ; loại biểu đồ cụ thể; truy vấn lỗi/rỗng; cần làm rõ; biểu đồ lỗi nhưng vẫn giữ bảng và text.
 
-**Thành phần dự kiến:** mở rộng `PipelineRequest`, `PipelineResult`, `PipelineOrchestrator`, API response và phần hiển thị kết quả trong `frontend/ui/main_view.py`.
+**Thành phần dự kiến**
+
+- `backend/pipeline/orchestrator.py`: điều phối luồng chung; chạy SQL và truy vấn, luôn tạo phản hồi text cho kết quả hợp lệ, chỉ gọi nhánh biểu đồ khi được yêu cầu.
+- `backend/agents/sql_agent.py` và `backend/tools/sql_tools.py`: tái sử dụng sinh SQL và thực thi truy vấn chỉ đọc hiện có.
+- Agent/tool trả lời text mới hoặc bước tương ứng trong pipeline: nhận câu hỏi + kết quả truy vấn giới hạn, tạo câu trả lời ngắn có căn cứ.
+- `backend/agents/viz_agent.py` và `backend/tools/viz_tools.py`: tái sử dụng để tạo/render biểu đồ theo yêu cầu; tách lỗi biểu đồ khỏi kết quả truy vấn.
+- `backend/api/schemas.py` và `backend/api/routes.py`: mở rộng request/response; nhận tùy chọn phụ về hiển thị SQL và biểu đồ, trả answer/table/SQL/chart với trạng thái riêng.
+- `frontend/api_client.py`, `frontend/app.py`, `frontend/ui/main_view.py`: giữ một ô chat; hiển thị text + bảng mặc định, SQL trong expander, tùy chọn biểu đồ ở cạnh ô nhập.
+
+**Phạm vi kiến trúc:** chưa cần LangGraph cho luồng MVP này.
 
 ## Giai đoạn 4 — Quản lý dataset và quan hệ
 
