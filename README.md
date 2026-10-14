@@ -112,15 +112,17 @@ Data-Analytics-System/
 3. AnswerAgent.generate(question, df)       LUÔN chạy khi truy vấn thành công: câu trả lời text ngắn
                                             LLM (chỉ nhận cột + tối đa ANSWER_MAX_ROWS dòng đầu) → answer_is_grounded
                                             → nếu số liệu không có trong kết quả / LLM lỗi / mock → tool template_answer
-4. (tùy chọn) biểu đồ                       chỉ khi người dùng yêu cầu: VizAgent.generate_code → tool render_chart
-                                            lỗi ở đây chỉ ghi vào `chart.status="error"`, text + bảng + SQL vẫn trả về
+4. (tùy chọn) EDA                          các bước EDA trong kế hoạch (mục 6c)
+5. (tùy chọn) biểu đồ                       chỉ khi người dùng yêu cầu: tool build_chart_spec (chọn loại + chuẩn bị dữ liệu từ
+                                            kết quả query/EDA) → tool render_chart_spec (giai đoạn 5, mục 6d)
+                                            lỗi ở đây chỉ ghi vào `chart.status="error"`; text + bảng + EDA vẫn trả về
 ```
 
-**Khi nào vẽ biểu đồ** (`tools/intent.py` + tùy chọn `chart_hint`): mặc định `detect` — chỉ vẽ nếu câu hỏi có yêu cầu ("vẽ biểu đồ…", "plot…", "chart…"; loại cụ thể như "biểu đồ tròn/cột/đường/phân tán", "pie/bar/line/scatter"); `none` — không vẽ kể cả khi câu hỏi yêu cầu; `auto` — vẽ, tự chọn loại; hoặc một loại cụ thể. Câu phủ định ("không cần vẽ biểu đồ") không kích hoạt vẽ. **Khi nào mở sẵn SQL:** `show_sql=true` hoặc câu hỏi nhắc tới SQL ("cho xem SQL", "câu lệnh truy vấn"); SQL luôn có trong `evidence`.
+**Khi nào vẽ biểu đồ** (`tools/intent.py` + tùy chọn `chart_hint`): mặc định `detect` — chỉ vẽ nếu câu hỏi có yêu cầu ("vẽ biểu đồ…", "plot…", "chart…"; loại cụ thể như "biểu đồ tròn/cột/đường/phân tán/histogram/mật độ/boxplot/violin/heatmap/count plot"); `none` — không vẽ kể cả khi câu hỏi yêu cầu; `auto` — vẽ, tự chọn loại; hoặc một loại cụ thể. Câu phủ định ("không cần vẽ biểu đồ") không kích hoạt vẽ. **Khi nào mở sẵn SQL:** `show_sql=true` hoặc câu hỏi nhắc tới SQL ("cho xem SQL", "câu lệnh truy vấn"); SQL luôn có trong `evidence`.
 
 Trong bước SQL agent dùng câu hỏi gốc; loại biểu đồ (`"... (as a pie chart)"`) chỉ được thêm vào nhánh biểu đồ.
 
-**Chuỗi fallback của VizAgent** (giữ nguyên hành vi cũ, có test):
+**Chuỗi fallback của VizAgent** (chỉ dùng khi `VIZ_MODE=code`; mặc định là `spec`, xem mục 6d):
 
 ```
 use_mock                 → mock
@@ -136,16 +138,16 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 ## 4. REST API
 
-| Method | Path                                     | Mô tả                                                                                                                                                                                                                                                         |
-| ------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/health`                          | `db_exists`, `llm_provider`, `llm_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                                                                                                                            |
-| GET    | `/api/schema?dataset_id=`              | `{tables: {tên_bảng: [cột...]}, relations: [...]}`; bỏ `dataset_id` = demo DB (503 nếu chưa tạo)                                                                                                                                                     |
-| GET    | `/api/models`                          | Model Ollama đã pull + model mặc định                                                                                                                                                                                                                      |
-| POST   | `/api/datasets`                        | Upload (multipart`file`): CSV / `.xlsx` / `.db` `.sqlite` → `201` + `dataset_id`, bảng, số dòng, cảnh báo                                                                                                                                     |
-| GET    | `/api/datasets/{dataset_id}`           | Metadata dataset (bảng, cột, khóa ngoại, quan hệ đã xác nhận)                                                                                                                                                                                          |
-| POST   | `/api/datasets/{dataset_id}/relations` | Xác nhận quan hệ`{from_table, from_column, to_table, to_column}` (kiểm tra bảng/cột tồn tại)                                                                                                                                                          |
-| DELETE | `/api/datasets/{dataset_id}/relations` | Xóa một quan hệ đã xác nhận (cùng body)                                                                                                                                                                                                                 |
-| POST   | `/api/query`                           | Hỏi đáp. Body:`question`, `dataset_id` (tùy chọn), `chart_hint` (`detect`\|`none`\|`auto`\|`bar chart`\|`line chart`\|`pie chart`\|`scatter plot`), `show_sql`, `use_mock_sql`, `use_ollama`, `use_mock_viz`, `ollama_model` |
+| Method | Path                                     | Mô tả                                                                                                                                                                                                                                                                                                                                                  |
+| ------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/health`                          | `db_exists`, `llm_provider`, `llm_configured`, `ollama_running`, `ollama_default_model`, `max_upload_mb`                                                                                                                                                                                                                                     |
+| GET    | `/api/schema?dataset_id=`              | `{tables: {tên_bảng: [cột...]}, relations: [...]}`; bỏ `dataset_id` = demo DB (503 nếu chưa tạo)                                                                                                                                                                                                                                              |
+| GET    | `/api/models`                          | Model Ollama đã pull + model mặc định                                                                                                                                                                                                                                                                                                               |
+| POST   | `/api/datasets`                        | Upload (multipart`file`): CSV / `.xlsx` / `.db` `.sqlite` → `201` + `dataset_id`, bảng, số dòng, cảnh báo                                                                                                                                                                                                                              |
+| GET    | `/api/datasets/{dataset_id}`           | Metadata dataset (bảng, cột, khóa ngoại, quan hệ đã xác nhận)                                                                                                                                                                                                                                                                                   |
+| POST   | `/api/datasets/{dataset_id}/relations` | Xác nhận quan hệ`{from_table, from_column, to_table, to_column}` (kiểm tra bảng/cột tồn tại)                                                                                                                                                                                                                                                   |
+| DELETE | `/api/datasets/{dataset_id}/relations` | Xóa một quan hệ đã xác nhận (cùng body)                                                                                                                                                                                                                                                                                                          |
+| POST   | `/api/query`                           | Hỏi đáp. Body:`question`, `dataset_id` (tùy chọn), `chart_hint` (`detect`\|`none`\|`auto`\|`bar chart`\|`line chart`\|`pie chart`\|`scatter plot`\|`histogram`\|`kde plot`\|`box plot`\|`violin plot`\|`heatmap`\|`count plot`), `show_sql`, `use_mock_sql`, `use_ollama`, `use_mock_viz`, `ollama_model` |
 
 `/api/query` trả HTTP 200 với hợp đồng tách rõ từng phần:
 
@@ -254,28 +256,60 @@ SQLite vẫn là định dạng lưu trữ chuẩn. EDA **không** phải chatbo
 
 **Kế hoạch xử lý** (`tools/planner.py`, `agents/planner_agent.py`): `ProcessingPlan` = danh sách bước `{operation, table, columns, params}` + yêu cầu biểu đồ + yêu cầu hiển thị SQL.
 
-| Tình huống | Cách định tuyến |
-| --- | --- |
-| Không có từ khóa EDA (“doanh thu theo vùng”, “top 5 sản phẩm”) | `[query]` bằng quy tắc; **không** gọi LLM planner, **không** chạy EDA |
-| Từ khóa EDA rõ ràng, không có phần truy vấn (“tổng quan”, “giá trị thiếu”, “trùng lặp”, “thống kê mô tả”, “phân phối”, “top giá trị”, “tương quan”; có cả tiếng Anh và không dấu) | các bước EDA bằng quy tắc (bảng/cột nhận từ tên được nhắc tới) |
-| Kết hợp (“doanh thu theo vùng **và** kiểm tra giá trị thiếu”) | LLM trả kế hoạch JSON; không có LLM/mock → bản nháp của quy tắc; LLM không gọi được → `rules_fallback` |
-| Kế hoạch sai/mơ hồ (operation ngoài allowlist, bảng/cột không tồn tại, tham số lỗi, nhiều bảng mà không rõ bảng nào) | `validate_plan` từ chối → `needs_clarification` với câu hỏi làm rõ; không chạy gì |
+| Tình huống                                                                                                                                                                                                                  | Cách định tuyến                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Không có từ khóa EDA (“doanh thu theo vùng”, “top 5 sản phẩm”)                                                                                                                                                     | `[query]` bằng quy tắc; **không** gọi LLM planner, **không** chạy EDA                               |
+| Từ khóa EDA rõ ràng, không có phần truy vấn (“tổng quan”, “giá trị thiếu”, “trùng lặp”, “thống kê mô tả”, “phân phối”, “top giá trị”, “tương quan”; có cả tiếng Anh và không dấu) | các bước EDA bằng quy tắc (bảng/cột nhận từ tên được nhắc tới)                                           |
+| Kết hợp (“doanh thu theo vùng**và** kiểm tra giá trị thiếu”)                                                                                                                                                  | LLM trả kế hoạch JSON; không có LLM/mock → bản nháp của quy tắc; LLM không gọi được →`rules_fallback` |
+| Kế hoạch sai/mơ hồ (operation ngoài allowlist, bảng/cột không tồn tại, tham số lỗi, nhiều bảng mà không rõ bảng nào)                                                                                       | `validate_plan` từ chối → `needs_clarification` với câu hỏi làm rõ; không chạy gì                        |
 
 `validate_plan` áp cho mọi kế hoạch (quy tắc lẫn LLM): operation ∈ allowlist, tên bảng/cột phải có trong schema (chuẩn hóa hoa/thường), `top_k` ∈ [1, 50], `method` ∈ {pearson, spearman}, tối đa một bước `query`, tối đa 6 bước; tham số lạ bị loại. Tổng quan/chất lượng không nêu bảng thì áp dụng cho các bảng của dataset (tối đa `EDA_MAX_TABLES`); các operation khác cần bảng rõ ràng.
 
 **EDA tools** (xác định, chỉ đọc, đăng ký trong `container.py`; LLM không sinh hay chạy code phân tích):
 
-| Tool | Nội dung | Cách tính |
-| --- | --- | --- |
-| `eda_table_overview` | số dòng/cột; kiểu khai báo, kiểu quan sát (`typeof`), kiểu/ghi chú lúc import; NULL; số giá trị phân biệt | SQL (chính xác) |
-| `eda_data_quality` | NULL theo cột (số và %), ô chuỗi rỗng (đếm riêng), dòng trùng lặp | SQL. **Trùng lặp = số dòng thừa so với bản đầu của dòng giống hệt trên mọi cột** (hoặc trên các cột chỉ định); NULL coi là bằng nhau |
-| `eda_numeric_summary` | count, missing, non_numeric, mean, std, min, q1, median, q3, max | count/mean/min/max/std bằng SQL (std mẫu, 2 lượt); quartile bằng pandas (nội suy tuyến tính). Chỉ giá trị số (`typeof` integer/real) được tính, giá trị chữ lẫn trong cột bị bỏ qua + cảnh báo |
-| `eda_categorical_summary` | số nhóm, top-k giá trị (số lần, %) | SQL `GROUP BY` |
-| `eda_correlation` | ma trận Pearson/Spearman + cặp mạnh nhất | pandas; **pairwise deletion** (bỏ NULL/giá trị không phải số theo từng cặp, cần ≥ 3 cặp); cột hằng số bị loại |
+| Tool                        | Nội dung                                                                                                                  | Cách tính                                                                                                                                                                                                               |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eda_table_overview`      | số dòng/cột; kiểu khai báo, kiểu quan sát (`typeof`), kiểu/ghi chú lúc import; NULL; số giá trị phân biệt | SQL (chính xác)                                                                                                                                                                                                         |
+| `eda_data_quality`        | NULL theo cột (số và %), ô chuỗi rỗng (đếm riêng), dòng trùng lặp                                              | SQL.**Trùng lặp = số dòng thừa so với bản đầu của dòng giống hệt trên mọi cột** (hoặc trên các cột chỉ định); NULL coi là bằng nhau                                                        |
+| `eda_numeric_summary`     | count, missing, non_numeric, mean, std, min, q1, median, q3, max                                                           | count/mean/min/max/std bằng SQL (std mẫu, 2 lượt); quartile bằng pandas (nội suy tuyến tính). Chỉ giá trị số (`typeof` integer/real) được tính, giá trị chữ lẫn trong cột bị bỏ qua + cảnh báo |
+| `eda_categorical_summary` | số nhóm, top-k giá trị (số lần, %)                                                                                   | SQL`GROUP BY`                                                                                                                                                                                                           |
+| `eda_correlation`         | ma trận Pearson/Spearman + cặp mạnh nhất                                                                               | pandas;**pairwise deletion** (bỏ NULL/giá trị không phải số theo từng cặp, cần ≥ 3 cặp); cột hằng số bị loại                                                                                        |
 
 **Giới hạn** (`.env`): `EDA_MAX_COLUMNS` 50, `EDA_TOP_K` 10, `EDA_SAMPLE_ROWS` 50000 (dữ liệu đưa sang pandas; vượt thì lấy mẫu có hệ thống mỗi k dòng), `EDA_TIMEOUT` 20 s mỗi operation (cộng timeout 10 s mỗi câu SQL), `EDA_CORR_MAX_COLUMNS` 15, `EDA_MAX_TABLES` 10. Payload ghi rõ: `exact` (False nếu lấy mẫu / cắt cột / hết thời gian), `sampled` + `sample_info`, `truncated`, `warnings`, `definitions` (cách tính) và `queries` (SQL đã chạy, hiển thị trong “Bằng chứng / SQL”). Câu trả lời text của EDA là template xác định dựng từ payload nên không có số nào ngoài kết quả.
 
-**Chưa làm (giai đoạn sau):** biểu đồ từ kết quả EDA (giai đoạn 5; yêu cầu vẽ trong lượt chỉ-EDA trả `chart.status="error"` kèm lời giải thích, các kết quả khác vẫn giữ nguyên); phát hiện ngoại lai; quản lý dataset (giai đoạn 6).
+**Chưa làm (giai đoạn sau):** phát hiện ngoại lai; quản lý dataset (giai đoạn 6). Biểu đồ từ kết quả EDA: xem mục 6d.
+
+---
+
+## 6d. Biểu đồ (giai đoạn 5)
+
+Biểu đồ vẫn là bước phụ của cùng lượt chat (không có luồng riêng), dùng lại **kết quả query / EDA đã có** thay vì nạp lại cả bảng.
+
+**Chế độ vẽ** (`VIZ_MODE`, hiển thị ở `/api/health`):
+
+- `spec` (**mặc định**): bộ vẽ xác định. `build_chart_spec` chọn loại và dựng dữ liệu, `render_chart_spec` vẽ bằng matplotlib. Không `exec`, không chạy code do LLM sinh; chỉ các loại trong allowlist `CHART_TYPES`.
+- `code`: đường cũ (LLM sinh code matplotlib rồi `exec` trong `tools/viz_tools.py`, **chưa sandbox**). Chỉ dùng khi chạy trên localhost với dữ liệu tin cậy; chế độ này không vẽ được từ kết quả EDA.
+
+**Loại biểu đồ:** `bar chart`, `line chart`, `pie chart`, `scatter plot`, `histogram`, `kde plot`, `box plot`, `violin plot`, `heatmap` (tương quan, hoặc bảng chéo 2 cột nhóm × 1 cột số), `count plot` (tần suất nhóm).
+
+**Chọn loại** (`tools/chart_select.py`): người dùng chỉ định loại (trong prompt hoặc ở sidebar) thì luôn giữ đúng loại đó; dữ liệu không hợp (pie có giá trị âm, scatter < 2 cột số, line 1 điểm, KDE < 5 giá trị...) → `chart.status="error"` kèm lý do + gợi ý, **không âm thầm đổi loại**. Loại chỉ định ít hợp mục tiêu trong câu hỏi thì vẫn vẽ nhưng thêm cảnh báo. Khi tự chọn (`auto`, hoặc câu hỏi chỉ nói “vẽ biểu đồ”) loại được chọn theo **mục tiêu** (`detect_chart_goal`: so sánh / xu hướng / phân phối / quan hệ / thành phần) và **kiểu cột** (số, thời gian, phân loại):
+
+| Dữ liệu / mục tiêu                                                     | Loại tự chọn                                        |
+| -------------------------------------------------------------------------- | ------------------------------------------------------ |
+| thành phần, 1 nhóm + 1 số không âm, ≤`CHART_PIE_MAX_SLICES` nhóm | pie (nhiều nhóm/âm → bar)                          |
+| cột thời gian (hoặc year/month dạng số) + cột số                    | line                                                   |
+| quan hệ, ≥ 3 cột số / 2 cột số                                       | heatmap / scatter                                      |
+| phân phối: 1 cột số / số + nhóm / chỉ nhóm                         | histogram / box / count                                |
+| nhóm + số (mặc định)                                                  | bar (sắp theo giá trị, top`CHART_MAX_CATEGORIES`) |
+| 1 cột số / chỉ cột phân loại                                         | histogram / count                                      |
+
+**Nguồn dữ liệu** (`chart.meta.source`): `query_result` (bảng truy vấn, đã bị giới hạn dòng/byte khi chạy); `eda_payload` (dùng số liệu EDA có sẵn: tương quan → heatmap, top giá trị → count/bar/pie, % NULL → bar, quartile → box); `sql_aggregate` (histogram của cột số: gom `CHART_HIST_BINS` khoảng bằng SQL, **chính xác, không lấy mẫu**); `table_sample` (KDE/violin của cột số: mẫu có hệ thống tối đa `CHART_SAMPLE_ROWS` dòng). Lượt có cả query lẫn EDA ưu tiên bảng query (trừ heatmap khi có payload tương quan). Overview bảng không có dạng số liệu để vẽ → lỗi rõ ràng.
+
+**Thông tin kèm biểu đồ** (`chart.meta`): nguồn, `rows_total`/`rows_used`, phương pháp (gộp tổng, mẫu mỗi k dòng, bin SQL...), loại được chọn + lý do, cột x/y/nhóm, tiêu đề, nhãn trục, đơn vị (chỉ suy ra khi tên cột nói rõ: `price (USD)`, `growth_pct`...), `warnings` (cắt top-N, gộp “Khác”, lấy mẫu, kết quả bị cắt, cột bị loại...). UI hiện cảnh báo dưới ảnh và mục “📈 Cách vẽ biểu đồ”; sidebar có ô “Loại biểu đồ” (Theo câu hỏi / Không vẽ / Tự chọn / loại cụ thể).
+
+**Giới hạn** (`.env`): `CHART_MAX_CATEGORIES` 30, `CHART_PIE_MAX_SLICES` 8, `CHART_MAX_POINTS` 2000, `CHART_SAMPLE_ROWS` 20000, `CHART_HIST_BINS` 30.
+
+**Lỗi biểu đồ không làm mất kết quả:** mọi lỗi (dữ liệu không hợp, lỗi bất ngờ khi vẽ) chỉ đặt `chart.status="error"`; câu trả lời, bảng query và kết quả EDA vẫn trả về.
 
 ---
 
@@ -289,6 +323,8 @@ SQLite vẫn là định dạng lưu trữ chuẩn. EDA **không** phải chatbo
 - **Test với LLM giả:** `build_container(settings, deepseek=FakeLLM(...), ollama=FakeLLM(...))` — xem `tests/conftest.py`.
 
 ---
+
+**Giai đoạn 5 đổi hành vi mặc định:** biểu đồ vẽ bằng bộ vẽ xác định (`VIZ_MODE=spec`) thay vì code do LLM sinh; `/api/health` có thêm `viz_mode`; `chart.code/prompt` rỗng ở chế độ này và có thêm `chart.meta`; từ “cột” đứng một mình không còn được hiểu là biểu đồ cột (chỉ “biểu đồ cột”, “bar”...), “histogram” giờ là loại riêng. Đặt `VIZ_MODE=code` để dùng lại đường cũ.
 
 ## 8. Khác biệt so với bản cũ
 

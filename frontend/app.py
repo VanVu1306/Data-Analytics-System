@@ -98,6 +98,7 @@ if prompt and prompt.strip():
                     use_mock_viz=state.viz_use_mock,
                     ollama_model=state.ollama_model,
                     dataset_id=state.dataset_id,
+                    chart_hint=state.chart_hint,
                 )
                 reply = {"role": "assistant", "result": result, "dataset": current_label}
             except APIError as e:

@@ -16,6 +16,8 @@ from backend.database import DatasetStore, ImportLimits, SQLiteRepository
 from backend.llm import LLMClient, OllamaClient, create_cloud_llm
 from backend.pipeline import DatasetService, PipelineOrchestrator
 from backend.tools import (
+    BuildChartSpecTool,
+    RenderChartSpecTool,
     EDA_TOOL_CLASSES,
     DescribeSchemaTool,
     EdaAnswerTool,
@@ -90,7 +92,9 @@ def build_container(
     tools.register(UnlinkTablesTool(datasets))
     tools.register(MockSQLTool(datasets))
     tools.register(MockVizCodeTool())
-    tools.register(RenderChartTool(dpi=settings.chart_dpi))
+    tools.register(RenderChartTool(dpi=settings.chart_dpi))  # chế độ VIZ_MODE=code (cũ)
+    tools.register(BuildChartSpecTool(datasets, settings))
+    tools.register(RenderChartSpecTool(dpi=settings.chart_dpi))
     tools.register(TemplateAnswerTool())
     tools.register(EdaAnswerTool())
     for eda_cls in EDA_TOOL_CLASSES:
@@ -100,7 +104,7 @@ def build_container(
     viz_agent = VizAgent(local_llm=ollama, cloud_llm=cloud_llm, tools=tools, settings=settings)
     answer_agent = AnswerAgent(llm=cloud_llm, tools=tools, settings=settings)
     planner_agent = PlannerAgent(llm=cloud_llm, tools=tools, settings=settings)
-    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools, answer_agent, planner_agent)
+    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools, answer_agent, planner_agent, viz_mode=settings.viz_mode)
     dataset_service = DatasetService(tools, max_upload_bytes)
 
     return Container(

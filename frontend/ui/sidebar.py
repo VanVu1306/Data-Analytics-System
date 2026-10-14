@@ -25,6 +25,25 @@ OLLAMA_GUIDE = """
 """
 
 
+# Tùy chọn biểu đồ ở sidebar -> `chart_hint` của API. "Theo câu hỏi" để backend tự nhận diện từ prompt;
+# các lựa chọn khác ưu tiên hơn prompt (hợp đồng API hiện tại).
+CHART_OPTIONS = {
+    "Theo câu hỏi": "detect",
+    "Không vẽ": "none",
+    "Tự chọn loại phù hợp": "auto",
+    "Biểu đồ cột (bar)": "bar chart",
+    "Biểu đồ đường (line)": "line chart",
+    "Biểu đồ tròn (pie)": "pie chart",
+    "Phân tán (scatter)": "scatter plot",
+    "Histogram": "histogram",
+    "Mật độ (KDE)": "kde plot",
+    "Box plot": "box plot",
+    "Violin plot": "violin plot",
+    "Heatmap tương quan": "heatmap",
+    "Đếm tần suất (count)": "count plot",
+}
+
+
 @dataclass
 class SidebarState:
     sql_use_mock: bool
@@ -37,6 +56,8 @@ class SidebarState:
     dataset_id: Optional[str] = None  # None = demo DB
     tables: Optional[List[str]] = None  # None = không có dataset nào để hỏi
     schema: Optional[Schema] = None
+    chart_hint: str = "detect"  # xem CHART_OPTIONS
+    viz_mode: str = "spec"
 
 
 def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
@@ -77,40 +98,45 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
 
         st.divider()
 
-        # ── Vẽ biểu đồ (Ollama) ──────────────────────────────
-        st.subheader("🦙 Vẽ biểu đồ (Text-to-Python)")
-        if health.ollama_running:
-            try:
-                local_models = client.models()
-            except APIError:
-                local_models = []
-            st.markdown(
-                '<span class="badge-ollama">🟢 Ollama running</span>',
-                unsafe_allow_html=True,
-            )
-            if local_models:
-                default = health.ollama_default_model
-                ollama_model = st.selectbox(
-                    "Llama model:",
-                    options=local_models,
-                    index=local_models.index(default) if default in local_models else 0,
-                )
+        # ── Biểu đồ ───────────────────────────────────────────────────────
+        st.subheader("📈 Biểu đồ")
+        chart_label = st.selectbox(
+            "Loại biểu đồ:",
+            options=list(CHART_OPTIONS),
+            index=0,
+            help="'Theo câu hỏi': chỉ vẽ khi câu hỏi yêu cầu. Lựa chọn khác sẽ ưu tiên hơn nội dung câu hỏi.",
+        )
+        chart_hint = CHART_OPTIONS[chart_label]
+        viz_use_ollama = False
+        viz_use_mock = False
+        if health.viz_mode == "code":  # chế độ cũ: LLM sinh code matplotlib
+            st.caption("Chế độ VIZ_MODE=code: LLM sinh code vẽ biểu đồ.")
+            if health.ollama_running:
+                try:
+                    local_models = client.models()
+                except APIError:
+                    local_models = []
+                st.markdown('<span class="badge-ollama">🟢 Ollama running</span>', unsafe_allow_html=True)
+                if local_models:
+                    default = health.ollama_default_model
+                    ollama_model = st.selectbox(
+                        "Llama model:",
+                        options=local_models,
+                        index=local_models.index(default) if default in local_models else 0,
+                    )
+                else:
+                    st.warning("No models found. Run: `ollama pull llama3.2`")
+                viz_use_ollama = st.checkbox("Use Ollama local (privacy mode)", value=True)
             else:
-                st.warning("No models found. Run: `ollama pull llama3.2`")
-            viz_use_ollama = st.checkbox("Use Ollama local (privacy mode)", value=True)
+                st.markdown('<span class="badge-mock">🟡 Ollama not running</span>', unsafe_allow_html=True)
+                st.caption("Start: `ollama serve` (terminal khác)")
+                if health.llm_configured:
+                    st.info(f"Sẽ dùng {provider_label} làm fallback")
+            viz_use_mock = st.checkbox("Dùng mock Viz code (debugging)", value=False)
+            with st.expander("🦙 Hướng dẫn cài Ollama"):
+                st.markdown(OLLAMA_GUIDE)
         else:
-            st.markdown(
-                '<span class="badge-mock">🟡 Ollama not running</span>',
-                unsafe_allow_html=True,
-            )
-            st.caption("Start: `ollama serve` (terminal khác)")
-            viz_use_ollama = False
-            if health.llm_configured:
-                st.info(f"Sẽ dùng {provider_label} làm fallback")
-
-        viz_use_mock = st.checkbox("Dùng mock Viz code (debugging)", value=False)
-        with st.expander("🦙 Hướng dẫn cài Ollama"):
-            st.markdown(OLLAMA_GUIDE)
+            st.caption("Biểu đồ được vẽ bằng bộ vẽ xác định (không chạy code do LLM sinh).")
 
         st.divider()
 
@@ -132,6 +158,8 @@ def render_sidebar(client: NL2VizClient, health: Health) -> SidebarState:
         ollama_model=ollama_model,
         ollama_running=health.ollama_running,
         llm_provider=health.llm_provider,
+        chart_hint=chart_hint,
+        viz_mode=health.viz_mode,
         has_cloud_llm_key=health.llm_configured,
         dataset_id=dataset_id,
         tables=tables,

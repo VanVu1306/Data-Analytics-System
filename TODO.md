@@ -110,18 +110,34 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 5 — Mở rộng loại biểu đồ và chọn biểu đồ phù hợp
 
-- [ ] Dùng chung kết quả query/EDA làm đầu vào vẽ; không tạo luồng chatbot/phân tích độc lập và không tải toàn bộ bảng lớn chỉ để vẽ.
-- [ ] Bổ sung histogram/KDE cho phân phối, box plot/violin plot cho phân phối/ngoại lệ, heatmap cho tương quan và count plot cho tần suất nhóm.
-- [ ] Chọn chart theo mục tiêu và kiểu dữ liệu (so sánh, xu hướng, phân phối, quan hệ, thành phần), không chỉ dựa vào từ khóa hoặc mặc định bar chart.
-- [ ] Giữ yêu cầu chart trong prompt; tùy chọn phụ “không vẽ / tự chọn / loại cụ thể” được ưu tiên theo hợp đồng API hiện tại, không bắt người dùng chọn chế độ trước khi chat.
-- [ ] Chuẩn bị dữ liệu chart bằng SQL aggregate hoặc sample có giới hạn; ghi số dòng gốc, số dòng dùng và phương pháp aggregate/sample.
-- [ ] Hiển thị tiêu đề, nhãn trục, đơn vị nếu biết và cảnh báo về sample/truncation hoặc dữ liệu không phù hợp với chart.
-- [ ] Ưu tiên renderer/hàm vẽ xác định với loại chart trong allowlist. Nếu tiếp tục chạy code do LLM sinh, xử lý rủi ro thực thi tại `backend/tools/viz_tools.py` trước khi dùng trên dữ liệu người dùng.
-- [ ] Kiểm thử từng chart với dữ liệu thiếu/ít điểm/cột không phù hợp/dữ liệu lớn/yêu cầu mâu thuẫn; lỗi chart không làm mất câu trả lời, bảng query hoặc kết quả EDA.
+- [X] Dùng chung kết quả query/EDA làm đầu vào vẽ; không tạo luồng chatbot/phân tích độc lập và không tải toàn bộ bảng lớn chỉ để vẽ.
+- [X] Bổ sung histogram/KDE cho phân phối, box plot/violin plot cho phân phối/ngoại lệ, heatmap cho tương quan và count plot cho tần suất nhóm.
+- [X] Chọn chart theo mục tiêu và kiểu dữ liệu (so sánh, xu hướng, phân phối, quan hệ, thành phần), không chỉ dựa vào từ khóa hoặc mặc định bar chart.
+- [X] Giữ yêu cầu chart trong prompt; tùy chọn phụ “không vẽ / tự chọn / loại cụ thể” được ưu tiên theo hợp đồng API hiện tại, không bắt người dùng chọn chế độ trước khi chat.
+- [X] Chuẩn bị dữ liệu chart bằng SQL aggregate hoặc sample có giới hạn; ghi số dòng gốc, số dòng dùng và phương pháp aggregate/sample.
+- [X] Hiển thị tiêu đề, nhãn trục, đơn vị nếu biết và cảnh báo về sample/truncation hoặc dữ liệu không phù hợp với chart.
+- [X] Ưu tiên renderer/hàm vẽ xác định với loại chart trong allowlist. Nếu tiếp tục chạy code do LLM sinh, xử lý rủi ro thực thi tại `backend/tools/viz_tools.py` trước khi dùng trên dữ liệu người dùng.
+- [X] Kiểm thử từng chart với dữ liệu thiếu/ít điểm/cột không phù hợp/dữ liệu lớn/yêu cầu mâu thuẫn; lỗi chart không làm mất câu trả lời, bảng query hoặc kết quả EDA.
 
 **Thành phần dự kiến:** mở rộng chart planner trong `backend/tools/intent.py`; renderer có kiểm soát trong `backend/tools/`; chuẩn bị dữ liệu từ kết quả query/EDA; cập nhật response/hiển thị trong `backend/api/schemas.py`, `backend/api/routes.py`, `frontend/api_client.py` và `frontend/ui/main_view.py`.
 
-## Giai đoạn 6 — Quản lý dataset và quan hệ
+## Giai đoạn 6 — Agent hóa Planner: lập kế hoạch query/EDA/chart bằng LLM
+
+- [ ] Mở rộng Planner Agent để LLM lập một kế hoạch thống nhất cho câu hỏi, thay vì dùng regex làm cơ chế quyết định chính cho query, EDA, câu hỏi kết hợp và yêu cầu biểu đồ.
+- [ ] Thiết kế hợp đồng kế hoạch JSON có cấu trúc, gồm:
+
+  - [ ] `steps`: một bước `query` tối đa và/hoặc các operation EDA được hỗ trợ, kèm câu hỏi con, bảng, cột và tham số cần thiết.
+  - [ ] `chart`: `requested`, loại biểu đồ và mục tiêu trực quan; cho phép loại/mục tiêu chưa xác định để hệ thống chọn phù hợp khi có dữ liệu.
+  - [ ] `clarification`: câu hỏi làm rõ nếu yêu cầu thiếu thông tin hoặc mơ hồ.
+- [ ] Cung cấp cho LLM schema của dataset và danh sách operation/chart được hỗ trợ; không gửi dữ liệu bảng nếu không cần thiết để lập kế hoạch.
+- [ ] Kiểm tra phản hồi LLM (JSON, operation, số bước, tên bảng/cột, tham số, chart type) bằng schema/allowlist trước khi chuyển Orchestrator thực thi; kế hoạch không hợp lệ hoặc mơ hồ thì yêu cầu làm rõ, không chạy một phần kế hoạch sai.
+- [ ] Giữ ranh giới trách nhiệm: Planner quyết định cần làm gì; SQL Agent sinh SQL; EDA tools tính toán; Viz Agent sinh mã vẽ trong `VIZ_MODE=code` hoặc chart tools dựng/render spec trong `VIZ_MODE=spec`.
+- [ ] Bảo toàn ràng buộc chế độ vẽ hiện tại, nếu kế hoạch yêu cầu chart nhưng không khả thi, trả trạng thái/lý do rõ ràng mà không làm mất câu trả lời và kết quả phân tích.
+- [ ] Kiểm thử query thường, EDA, kết hợp query + EDA, yêu cầu/không yêu cầu chart, loại chart cụ thể, `chart_hint` ưu tiên, yêu cầu mơ hồ, phản hồi LLM sai schema và lỗi/không khả dụng của LLM.
+
+**Thành phần dự kiến:** `backend/agents/planner_agent.py`, `backend/prompts/planner_prompts.py`, `backend/tools/planner.py`, `backend/tools/intent.py`, `backend/pipeline/orchestrator.py`, API plan schema/response và các kiểm thử Planner/pipeline liên quan.
+
+## Giai đoạn 7 — Quản lý dataset và quan hệ
 
 - [ ] Thêm API xem danh sách dataset nếu chính sách lưu trữ cho phép.
 - [ ] Thêm API xem schema/preview dữ liệu của dataset, giới hạn số dòng trả về.
@@ -131,7 +147,7 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 - [ ] Nếu chưa có tài khoản người dùng, xác định rõ dataset thuộc phiên nào và cách cô lập giữa các phiên; nếu có đăng nhập, kiểm tra quyền sở hữu ở mọi endpoint.
 - [ ] Kiểm thử truy cập chéo dataset/phiên bị từ chối và thao tác xóa không ảnh hưởng dataset khác.
 
-## Giai đoạn 7 — Hoàn thiện, an toàn và tài liệu
+## Giai đoạn 8 — Hoàn thiện, an toàn và tài liệu
 
 - [ ] Không tin cậy tên tệp, MIME type, `dataset_id` hoặc đường dẫn do client gửi.
 - [ ] Đặt giới hạn upload/import/truy vấn; không thực thi `.sql` script tùy ý trên môi trường ứng dụng.
@@ -142,7 +158,6 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 ## Mở rộng — Nếu được yêu cầu
 
 - [ ] Tạo luồng điều phối LangGraph để agent hóa toàn bộ hệ thống.
-- [ ] Giảm sự phụ thuộc của Planner Agent vào các quy tắc cố định (hiện tại đang sử dụng planner dựa trên regex).
 
 ## Tiêu chí hoàn thành MVP
 

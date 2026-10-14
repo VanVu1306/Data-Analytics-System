@@ -96,6 +96,14 @@ class Settings:
     eda_corr_max_columns: int     # số cột số tối đa cho ma trận tương quan
     eda_max_tables: int           # số bảng tối đa khi một câu hỏi EDA áp dụng cho cả dataset
 
+    # ── Biểu đồ (giai đoạn 5) ──────────────────────────────────────────────
+    viz_mode: str                 # "spec" (mặc định): bộ vẽ xác định, allowlist loại chart | "code": LLM sinh code matplotlib (cũ, exec)
+    chart_max_categories: int     # số nhóm tối đa trên bar/count plot (vượt thì lấy top)
+    chart_pie_max_slices: int     # số lát tối đa của pie (phần còn lại gộp "Khác")
+    chart_max_points: int         # số điểm tối đa của line/scatter (vượt thì lấy mẫu)
+    chart_sample_rows: int        # số dòng tối đa lấy từ DB để vẽ phân phối (KDE/violin/box)
+    chart_hist_bins: int          # số bin histogram khi gộp bằng SQL
+
     @property
     def has_deepseek_key(self) -> bool:
         return bool(self.deepseek_api_key)
@@ -145,6 +153,12 @@ def load_settings() -> Settings:
         eda_timeout_seconds=_env_float("EDA_TIMEOUT", 20.0),
         eda_corr_max_columns=_env_int("EDA_CORR_MAX_COLUMNS", 15),
         eda_max_tables=_env_int("EDA_MAX_TABLES", 10),
+        viz_mode=(_env_str("VIZ_MODE", "spec").strip().lower() if _env_str("VIZ_MODE", "spec").strip().lower() in ("spec", "code") else "spec"),
+        chart_max_categories=_env_int("CHART_MAX_CATEGORIES", 30),
+        chart_pie_max_slices=_env_int("CHART_PIE_MAX_SLICES", 8),
+        chart_max_points=_env_int("CHART_MAX_POINTS", 2000),
+        chart_sample_rows=_env_int("CHART_SAMPLE_ROWS", 20_000),
+        chart_hist_bins=_env_int("CHART_HIST_BINS", 30),
     )
 
 

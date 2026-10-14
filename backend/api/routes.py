@@ -7,6 +7,7 @@ Không chứa logic nghiệp vụ. Lỗi nghiệp vụ `DatasetError` được `
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 from typing import Optional
 
@@ -15,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from backend.api.schemas import (
     AnswerInfo,
+    ChartMetaInfo,
     ChartResult,
     DatasetResponse,
     EdaResultInfo,
@@ -117,6 +119,7 @@ def _to_response(result: PipelineResult) -> QueryResponse:
         code=result.viz_code,
         prompt=result.viz_prompt,
         source=result.viz_source,
+        meta=ChartMetaInfo(**dataclasses.asdict(result.chart_meta)) if result.chart_meta is not None else None,
     )
     plan = None
     if result.plan is not None:
@@ -150,6 +153,7 @@ def health(container: Container = Depends(get_container)) -> HealthResponse:
         ollama_running=container.ollama.is_available(),
         ollama_default_model=container.ollama.default_model,
         max_upload_mb=container.settings.max_upload_mb,
+        viz_mode=container.settings.viz_mode,
     )
 
 

@@ -19,6 +19,7 @@ class HealthResponse(BaseModel):
     ollama_running: bool
     ollama_default_model: str
     max_upload_mb: int = 50
+    viz_mode: str = "spec"                # spec = bộ vẽ xác định (allowlist) | code = LLM sinh code matplotlib
 
 
 class RelationInfo(BaseModel):
@@ -75,7 +76,11 @@ class DatasetResponse(BaseModel):
 
 
 # ── Query ──────────────────────────────────────────────────────────────────
-ChartHint = Literal["detect", "none", "auto", "bar chart", "line chart", "pie chart", "scatter plot"]
+ChartHint = Literal[
+    "detect", "none", "auto",
+    "bar chart", "line chart", "pie chart", "scatter plot",
+    "histogram", "kde plot", "box plot", "violin plot", "heatmap", "count plot",
+]
 
 
 class QueryRequest(BaseModel):
@@ -118,6 +123,27 @@ class Evidence(BaseModel):
     elapsed_ms: Optional[int] = None
 
 
+class ChartMetaInfo(BaseModel):
+    """Cách chuẩn bị dữ liệu và nhãn của biểu đồ (để người dùng kiểm chứng)."""
+
+    source: str = "query_result"          # query_result | eda_payload | table_sample | sql_aggregate
+    rows_total: Optional[int] = None      # số dòng gốc
+    rows_used: Optional[int] = None       # số dòng thực sự dùng để vẽ
+    method: str = ""
+    chart_type: str = ""                  # loại thực sự được vẽ
+    requested_type: Optional[str] = None  # loại người dùng chỉ định (None = tự chọn)
+    reason: str = ""
+    goal: Optional[str] = None            # comparison | trend | distribution | relationship | composition
+    x: Optional[str] = None
+    y: Optional[str] = None
+    group: Optional[str] = None
+    title: str = ""
+    xlabel: str = ""
+    ylabel: str = ""
+    units: Dict[str, str] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class ChartResult(BaseModel):
     """Kết quả nhánh biểu đồ, tách riêng khỏi truy vấn: lỗi ở đây không ảnh hưởng answer/table."""
 
@@ -128,7 +154,8 @@ class ChartResult(BaseModel):
     error: Optional[str] = None
     code: Optional[str] = None
     prompt: Optional[str] = None
-    source: Optional[str] = None
+    source: Optional[str] = None          # spec | mock | ollama | cloud...
+    meta: Optional["ChartMetaInfo"] = None  # chỉ có ở chế độ spec
 
 
 class PlanStepInfo(BaseModel):

@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sơ đồ tổng quan luồng xử lý của Data Analytics Chatbot">
+  <title>Data Analytics Chatbot — Luồng tổng quan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18324b;
+      --muted: #5c7187;
+      --line: #c8d5e2;
+      --blue: #eaf3ff;
+      --purple: #f1ecff;
+      --green: #eaf7f0;
+      --amber: #fff5e5;
+      --rose: #fff0f0;
+      --white: #fff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f4f7fb;
+      color: var(--ink);
+      font: 16px/1.5 "Segoe UI", Arial, sans-serif;
+    }
+    main {
+      width: min(1600px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 42px 0 34px;
+    }
+    header { text-align: center; margin-bottom: 28px; }
+    h1 { margin: 0; font-size: clamp(27px, 4vw, 40px); letter-spacing: -.03em; }
+    header p { margin: 8px 0 0; color: var(--muted); font-size: 17px; }
+    h2 { margin: 0 0 12px; font-size: 19px; }
+    h3 { margin: 0 0 7px; font-size: 16px; }
+    p { margin: 0; }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 19px 22px;
+      background: var(--white);
+      box-shadow: 0 7px 20px #203c5910;
+    }
+    .input {
+      background: var(--blue);
+      text-align: center;
+    }
+    .input-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 15px;
+    }
+    .input-item {
+      padding: 11px;
+      border-radius: 10px;
+      background: #ffffffbd;
+      color: #36536f;
+      font-size: 14px;
+    }
+    .down {
+      height: 38px;
+      display: grid;
+      place-items: center;
+      color: #7890a7;
+      font-size: 25px;
+      line-height: 1;
+    }
+    .planner {
+      background: var(--purple);
+      text-align: center;
+      border-color: #d7c9ff;
+    }
+    .planner p { color: #52647d; }
+    .pill {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #fff;
+      color: #5946a3;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .horizontal-flow {
+      display: grid;
+      grid-template-columns: minmax(170px, 0.65fr) 34px minmax(0, 3.5fr) 34px minmax(170px, 0.65fr);
+      min-width: 1380px;
+      align-items: center;
+      gap: 12px;
+    }
+    .flow-scroll { overflow-x: auto; padding-bottom: 10px; }
+    .source-column, .output-column {
+      display: grid;
+      gap: 13px;
+      align-content: center;
+    }
+    .side-arrow {
+      display: grid;
+      place-items: center;
+      color: #7890a7;
+      font-size: 30px;
+      font-weight: 300;
+    }
+    .branches {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: stretch;
+      gap: 14px;
+    }
+    .branch {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: #ffffffa8;
+    }
+    .branch.query { border-top: 5px solid #e7ad4d; }
+    .branch.eda { border-top: 5px solid #62ad80; }
+    .branch-intro { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+    .step {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--white);
+    }
+    .step p { color: var(--muted); font-size: 14px; }
+    .model {
+      display: inline-block;
+      margin-top: 7px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: #f1f4f8;
+      color: #4f6479;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .agent {
+      color: #425b78;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+    .kind {
+      display: inline-block;
+      margin: 0 0 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    .kind.agent-kind { background: #ece8ff; color: #55429b; }
+    .kind.rule-kind { background: #eaf0f7; color: #52677d; }
+    .kind.tool-kind { background: #e7f5ed; color: #35684b; }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin: -12px 0 22px;
+    }
+    .legend .kind { margin: 0; }
+    .flow-down {
+      height: 25px;
+      display: grid;
+      place-items: center;
+      color: #91a3b5;
+      font-size: 21px;
+    }
+    .query-steps {
+      display: grid;
+      grid-template-columns: 1fr 20px 1fr 20px 1fr;
+      align-items: center;
+      gap: 4px;
+    }
+    .query-steps .flow-down {
+      height: auto;
+      transform: rotate(-90deg);
+    }
+    .chart-flow {
+      margin-top: 14px;
+      padding: 13px 16px;
+      border: 1px dashed #d5b4bd;
+      border-radius: 13px;
+      background: var(--rose);
+      text-align: center;
+    }
+    .chart-flow p { color: var(--muted); font-size: 13px; }
+    .chart-flow .model { background: #fff; }
+    .operations {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .operation {
+      min-height: 64px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: var(--green);
+      color: #315a43;
+      font-size: 13px;
+    }
+    .operation strong { display: block; color: #244a35; font-size: 14px; }
+    .combine {
+      margin: 14px 0 0;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: #eaf0f7;
+      color: #52677d;
+      font-size: 12px;
+      text-align: center;
+    }
+    .output {
+      background: #e8f7f3;
+      border-color: #b7e1d5;
+      text-align: center;
+    }
+    .output-items {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 7px;
+      margin-top: 12px;
+    }
+    .output-item {
+      padding: 9px 7px;
+      border-radius: 10px;
+      background: #ffffffc9;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .chart-note {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    footer {
+      margin-top: 28px;
+      color: #8192a4;
+      font-size: 12px;
+      text-align: center;
+    }
+    @media (max-width: 650px) {
+      main { width: min(100% - 24px, 560px); padding-top: 24px; }
+      header p { font-size: 15px; }
+      .flow-scroll { margin-right: -12px; }
+    }
+    @media print {
+      body { background: #fff; }
+      main { width: 100%; padding: 12px; }
+      .card, .branch { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Data Analytics Chatbot</h1>
+      <p>Từ dữ liệu và câu hỏi tự nhiên đến phân tích dễ hiểu</p>
+    </header>
+
+    <div class="legend" aria-label="Chú giải thành phần">
+      <span class="kind agent-kind">Agent · thành phần điều phối/sinh nội dung</span>
+      <span class="kind rule-kind">Quy tắc · định tuyến hoặc chọn theo điều kiện</span>
+      <span class="kind tool-kind">Tool · thực thi thao tác xác định</span>
+    </div>
+
+    <div class="flow-scroll">
+    <div class="horizontal-flow">
+      <div class="source-column">
+        <section class="card input" aria-labelledby="input-title">
+          <h2 id="input-title">Đầu vào</h2>
+          <div class="input-grid">
+            <div class="input-item"><strong>Dữ liệu</strong><br>Demo hoặc CSV, Excel, SQLite</div>
+            <div class="input-item"><strong>Yêu cầu</strong><br>Câu hỏi bằng ngôn ngữ tự nhiên</div>
+          </div>
+        </section>
+
+        <div class="down" aria-hidden="true">↓</div>
+
+        <section class="card planner" aria-labelledby="planner-title">
+          <span class="kind agent-kind">AGENT</span>
+          <h2 id="planner-title">Planner Agent</h2>
+          <p>Hiểu ý định, xem cấu trúc dữ liệu và chọn cách phân tích phù hợp.</p>
+          <span class="kind rule-kind">Quy tắc định tuyến trước; gọi cloud LLM khi cần</span>
+          <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6</span>
+        </section>
+      </div>
+
+      <div class="side-arrow" aria-hidden="true">→</div>
+
+      <div>
+        <div class="branches" aria-label="Các hướng xử lý">
+          <section class="branch eda" aria-labelledby="eda-title">
+            <h2 id="eda-title">Khám phá dữ liệu (EDA)</h2>
+            <p class="branch-intro">Tổng quan, kiểm tra chất lượng và thống kê.</p>
+            <div class="step">
+              <span class="kind tool-kind">EDA TOOLS · KHÔNG DÙNG LLM</span>
+              <div class="operations">
+                <div class="operation"><strong>Tổng quan</strong>Số dòng, cột, kiểu dữ liệu</div>
+                <div class="operation"><strong>Chất lượng</strong>Giá trị thiếu, ô rỗng, dòng trùng</div>
+                <div class="operation"><strong>Thống kê số</strong>Trung bình, min/max, độ lệch</div>
+                <div class="operation"><strong>Phân loại</strong>Nhóm và giá trị phổ biến</div>
+                <div class="operation"><strong>Tương quan</strong>Mối liên hệ giữa các cột số</div>
+                <div class="operation"><strong>Phân phối</strong>Đặc điểm phân bố dữ liệu</div>
+              </div>
+            </div>
+            <div class="flow-down" aria-hidden="true">↓</div>
+            <div class="step">
+              <span class="kind tool-kind">EDA ANSWER TOOL · mẫu xác định</span>
+              <h3>Tổng hợp kết quả phân tích</h3>
+              <p>Tạo diễn giải từ payload EDA; không phải Agent/LLM.</p>
+            </div>
+          </section>
+
+          <section class="branch query" aria-labelledby="query-title">
+            <h2 id="query-title">Hỏi và truy vấn dữ liệu</h2>
+            <p class="branch-intro">Câu hỏi cần kết quả cụ thể, lọc, nhóm hoặc so sánh.</p>
+            <div class="query-steps">
+              <div class="step">
+                <span class="kind agent-kind">AGENT · LLM</span>
+                <h3>SQL Agent</h3>
+                <p>Chuyển câu hỏi thành truy vấn dữ liệu.</p>
+                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6<br>Fallback mock nếu tắt LLM / thiếu API key</span>
+              </div>
+              <div class="flow-down" aria-hidden="true">↓</div>
+              <div class="step">
+                <span class="kind tool-kind">SQL TOOL</span>
+                <h3>Truy vấn dữ liệu</h3>
+                <p>Thực thi truy vấn chỉ đọc trên SQLite.</p>
+              </div>
+              <div class="flow-down" aria-hidden="true">↓</div>
+              <div class="step">
+                <span class="kind agent-kind">AGENT · LLM + kiểm tra grounding</span>
+                <h3>Answer Agent</h3>
+                <p>Tóm tắt kết quả dựa trên dữ liệu.</p>
+                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6<br>Fallback: câu trả lời mẫu</span>
+              </div>
+            </div>
+          </section>
+        </div>
+        <section class="chart-flow" aria-labelledby="chart-title">
+          <span class="kind rule-kind">NHÁNH TÙY CHỌN · khi người dùng yêu cầu biểu đồ</span>
+          <h3 id="chart-title">Từ kết quả truy vấn hoặc EDA → chọn loại biểu đồ → tạo ảnh</h3>
+          <p><span class="kind tool-kind">CHART TOOLS</span><br>BuildChartSpecTool chọn/chuẩn bị dữ liệu, RenderChartSpecTool vẽ và xuất PNG.</p>
+        </section>
+      </div>
+
+      <div class="side-arrow" aria-hidden="true">→</div>
+
+      <div class="output-column">
+        <section class="card output" aria-labelledby="output-title">
+          <span class="kind rule-kind">KẾT QUẢ</span>
+          <h2 id="output-title">Kết quả trong khung chat</h2>
+          <div class="output-items">
+            <div class="output-item">Câu trả lời dễ hiểu</div>
+            <div class="output-item">Bảng dữ liệu và kết quả phân tích</div>
+            <div class="output-item">Biểu đồ nếu được yêu cầu</div>
+          </div>
+        </section>
+        <p class="chart-note">Biểu đồ có thể được tạo từ kết quả truy vấn hoặc kết quả EDA.</p>
+      </div>
+    </div>
+    </div>
+    <footer>Agent có nhãn tím; quy tắc/điều kiện có nhãn xám xanh; tools thực thi thao tác có nhãn xanh lá.</footer>
+  </main>
+</body>
+</html>

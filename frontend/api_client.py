@@ -27,6 +27,7 @@ class Health:
     llm_configured: bool
     ollama_running: bool
     ollama_default_model: str
+    viz_mode: str = "spec"                # spec | code
 
 
 @dataclass
@@ -69,6 +70,7 @@ class Chart:
     code: Optional[str] = None
     prompt: Optional[str] = None
     source: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None  # nguồn dữ liệu, số dòng gốc/đã dùng, phương pháp, cảnh báo (chế độ spec)
 
 
 @dataclass
@@ -162,6 +164,7 @@ class NL2VizClient:
             llm_configured=d["llm_configured"],
             ollama_running=d["ollama_running"],
             ollama_default_model=d["ollama_default_model"],
+            viz_mode=d.get("viz_mode", "spec"),
         )
 
     def schema(self, dataset_id: Optional[str] = None) -> Schema:
@@ -253,5 +256,6 @@ class NL2VizClient:
                 code=ch.get("code"),
                 prompt=ch.get("prompt"),
                 source=ch.get("source"),
+                meta=ch.get("meta"),
             ),
         )

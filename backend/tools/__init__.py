@@ -3,7 +3,7 @@ from backend.tools.answer_tools import TemplateAnswerTool, answer_is_grounded, i
 from backend.tools.base import Tool, ToolRegistry
 from backend.tools.eda_tools import EDA_TOOL_CLASSES, OPERATIONS as EDA_OPERATIONS, EdaPayload, EdaTool
 from backend.tools.eda_text import EdaAnswerTool, is_vi_question, summarize_payload
-from backend.tools.intent import CHART_HINTS, CHART_TYPES, ChartPlan, detect_chart_request, detect_sql_request, resolve_chart_plan
+from backend.tools.intent import CHART_GOALS, CHART_HINTS, CHART_TYPES, ChartPlan, detect_chart_goal, detect_chart_request, detect_sql_request, resolve_chart_plan
 from backend.tools.mocks import MockSQLTool, MockVizCodeTool, mock_sql, mock_viz_code
 from backend.tools.data_tools import (
     DescribeSchemaTool,
@@ -16,9 +16,16 @@ from backend.tools.data_tools import (
     UnlinkTablesTool,
 )
 from backend.tools.text_utils import clean_code, extract_sql, is_valid_code
+from backend.tools.chart_render import RenderChartSpecTool, render_png
+from backend.tools.chart_select import ChartError, ChartLimits, ChartMeta, ChartSpec, build_from_frame
+from backend.tools.chart_tools import BuildChartSpecTool
 from backend.tools.viz_tools import ChartRender, RenderChartTool, execute_viz_code
 
 __all__ = [
+    "BuildChartSpecTool", "RenderChartSpecTool", "render_png",
+    "ChartError", "ChartLimits", "ChartMeta", "ChartSpec", "build_from_frame",
+    "CHART_GOALS",
+    "detect_chart_goal",
     "DescribeSchemaTool",
     "EdaAnswerTool",
     "is_vi_question",

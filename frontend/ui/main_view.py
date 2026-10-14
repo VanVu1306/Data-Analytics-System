@@ -134,16 +134,50 @@ def _render_eda(result: QueryResult) -> None:
                     st.caption(f"• {d}")
 
 
+_SOURCE_VI = {
+    "query_result": "kết quả truy vấn",
+    "eda_payload": "kết quả EDA",
+    "table_sample": "mẫu từ bảng dữ liệu",
+    "sql_aggregate": "gom nhóm bằng SQL",
+}
+
+
 def _render_chart(result: QueryResult) -> None:
     chart = result.chart
+    meta = chart.meta or {}
     if chart.status == "ok" and chart.png:
         st.image(chart.png, width="stretch")
+        for w in meta.get("warnings", []):
+            st.caption(f"⚠️ {w}")
     elif chart.status == "error":
-        st.warning(
-            "⚠️ Không vẽ được biểu đồ — câu trả lời và bảng kết quả ở trên vẫn đúng. "
-            "Chi tiết lỗi ở phần **Chi tiết biểu đồ**."
-        )
-    if chart.status != "not_requested" and (chart.code or chart.error):
+        if chart.source == "spec" and chart.error:
+            st.warning(f"⚠️ Không vẽ được biểu đồ: {chart.error}")
+            st.caption("Câu trả lời, bảng kết quả và kết quả EDA ở trên không bị ảnh hưởng.")
+        else:
+            st.warning(
+                "⚠️ Không vẽ được biểu đồ — câu trả lời và bảng kết quả ở trên vẫn đúng. "
+                "Chi tiết lỗi ở phần **Chi tiết biểu đồ**."
+            )
+    if chart.status == "not_requested":
+        return
+    if meta and chart.status == "ok":
+        with st.expander("📈 Cách vẽ biểu đồ", expanded=False):
+            req = meta.get("requested_type")
+            st.markdown(
+                f"- **Loại:** {meta.get('chart_type')} ({'do bạn chọn' if req else 'tự chọn'}"
+                f"{': ' + meta['reason'] if meta.get('reason') else ''})\n"
+                f"- **Nguồn dữ liệu:** {_SOURCE_VI.get(meta.get('source'), meta.get('source'))}\n"
+                f"- **Số dòng:** dùng {meta.get('rows_used'):,} / {meta.get('rows_total'):,} dòng gốc\n"
+                f"- **Cách chuẩn bị:** {meta.get('method') or '—'}"
+                if meta.get("rows_used") is not None and meta.get("rows_total") is not None
+                else f"- **Loại:** {meta.get('chart_type')}\n- **Cách chuẩn bị:** {meta.get('method') or '—'}"
+            )
+            cols = [f"{k}: {v}" for k, v in (("x", meta.get("x")), ("y", meta.get("y")), ("nhóm", meta.get("group"))) if v]
+            if cols:
+                st.caption("Cột dùng: " + " · ".join(cols))
+            if meta.get("units"):
+                st.caption("Đơn vị suy ra từ tên cột: " + ", ".join(f"{k} = {v}" for k, v in meta["units"].items()))
+    if chart.code or (chart.error and chart.source != "spec"):
         with st.expander("🐍 Chi tiết biểu đồ", expanded=False):
             tabs = st.tabs(["Mã Python", "Prompt", "Lỗi"] if chart.error else ["Mã Python", "Prompt"])
             with tabs[0]:

@@ -31,7 +31,7 @@ import pandas as pd
 from dataclasses import field
 
 from backend.agents import AnswerAgent, PlannerAgent, SQLAgent, VizAgent
-from backend.tools import EdaPayload, ToolRegistry, detect_sql_request, resolve_chart_plan
+from backend.tools import ChartError, EdaPayload, ToolRegistry, detect_sql_request, is_vi_question, resolve_chart_plan
 from backend.tools.planner import OP_QUERY, PlanStep, ProcessingPlan
 
 
@@ -52,7 +52,7 @@ class ChartStatus(str, Enum):
 @dataclass
 class PipelineRequest:
     question: str
-    chart_hint: str = "detect"        # detect | none | auto | bar chart | line chart | pie chart | scatter plot
+    chart_hint: str = "detect"        # detect | none | auto | một loại trong CHART_TYPES
     show_sql: bool = False            # người dùng bật hiển thị SQL (ngoài việc hỏi trực tiếp trong câu hỏi)
     use_mock_sql: bool = False        # không gọi cloud LLM: SQL mẫu + câu trả lời mẫu
     use_ollama: bool = True
@@ -89,6 +89,7 @@ class PipelineResult:
     viz_source: Optional[str] = None
     chart_error: Optional[str] = None
     chart_png: Optional[bytes] = None
+    chart_meta: Optional[dict] = None   # nguồn dữ liệu, số dòng gốc/đã dùng, phương pháp, cảnh báo, nhãn trục (chế độ spec)
     # Giai đoạn 4 — kế hoạch xử lý và kết quả EDA
     plan: Optional[ProcessingPlan] = None
     eda: list = field(default_factory=list)   # list[EdaPayload], theo thứ tự trong kế hoạch
@@ -102,7 +103,9 @@ class PipelineOrchestrator:
         tools: ToolRegistry,
         answer_agent: AnswerAgent,
         planner_agent: Optional[PlannerAgent] = None,
+        viz_mode: str = "code",
     ):
+        self._viz_mode = viz_mode  # "spec": bộ vẽ xác định (allowlist) | "code": LLM sinh code matplotlib (cũ)
         self._sql_agent = sql_agent
         self._viz_agent = viz_agent
         self._answer_agent = answer_agent
@@ -128,12 +131,15 @@ class PipelineOrchestrator:
         result.plan = plan
         if plan.eda_steps:
             self._run_eda(result, request, plan)
-        if query_step is None and plan.chart.requested:  # biểu đồ từ kết quả EDA: giai đoạn 5
+        if self._viz_mode == "spec":
+            if plan.chart.requested:
+                self._chart_spec(result, request, plan)
+        elif query_step is None and plan.chart.requested:  # chế độ code: không vẽ được từ kết quả EDA
             result.chart_origin, result.chart_type = plan.chart.origin, plan.chart.chart_type
             result.chart_status = ChartStatus.ERROR
             result.chart_error = (
-                "Biểu đồ cho kết quả EDA chưa được hỗ trợ (dự kiến giai đoạn 5); "
-                "hiện chỉ vẽ được biểu đồ cho kết quả truy vấn."
+                "Chế độ vẽ bằng code (VIZ_MODE=code) chỉ vẽ được biểu đồ cho kết quả truy vấn; "
+                "hãy dùng VIZ_MODE=spec để vẽ từ kết quả EDA."
             )
         return result
 
@@ -222,7 +228,7 @@ class PipelineOrchestrator:
         self._answer(result, request, df)
 
         # ── Stage 4: biểu đồ — chỉ khi được yêu cầu; lỗi không ảnh hưởng kết quả ──
-        if chart_plan.requested:
+        if chart_plan.requested and self._viz_mode == "code":
             result.chart_origin = chart_plan.origin
             result.chart_type = chart_plan.chart_type
             self._chart(result, request, df, chart_plan.chart_type)
@@ -240,6 +246,34 @@ class PipelineOrchestrator:
         result.answer = gen.text
         result.answer_source = gen.source
         result.answer_fallback_reason = gen.fallback_reason
+
+    def _chart_spec(self, result: PipelineResult, request: PipelineRequest, plan: ProcessingPlan) -> None:
+        """Biểu đồ xác định: chọn loại theo mục tiêu + kiểu dữ liệu, dùng kết quả truy vấn/EDA đã có.
+        Lỗi chỉ ghi vào chart_*; câu trả lời, bảng truy vấn và kết quả EDA được giữ nguyên."""
+        eda_ok = [p for p in result.eda if p.status == "ok"]
+        if result.df is None and not eda_ok:
+            return  # truy vấn lỗi/rỗng và không có EDA: không có dữ liệu để vẽ (trạng thái chính đã nói rõ)
+        result.chart_origin = plan.chart.origin
+        result.chart_type = plan.chart.chart_type
+        result.viz_source = "spec"
+        try:
+            spec = self._tools.get("build_chart_spec").run(
+                plan=plan.chart, df=result.df, eda=result.eda, dataset_id=request.dataset_id,
+                vi=is_vi_question(result.question),
+            )
+            result.chart_type = spec.chart_type
+            result.chart_meta = spec.meta
+            render = self._tools.get("render_chart_spec").run(spec=spec)
+        except ChartError as e:
+            result.chart_status, result.chart_error = ChartStatus.ERROR, str(e)
+            return
+        except Exception as e:  # lỗi bất ngờ ở biểu đồ không được làm mất phản hồi
+            result.chart_status, result.chart_error = ChartStatus.ERROR, f"{type(e).__name__}: {e}"
+            return
+        if render.error or not render.png:
+            result.chart_status, result.chart_error = ChartStatus.ERROR, render.error or "Không tạo được biểu đồ."
+        else:
+            result.chart_status, result.chart_png = ChartStatus.OK, render.png
 
     def _chart(
         self, result: PipelineResult, request: PipelineRequest, df: pd.DataFrame, chart_type: Optional[str]
