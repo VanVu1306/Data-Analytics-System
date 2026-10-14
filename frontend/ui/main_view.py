@@ -8,7 +8,6 @@ Trạng thái trong `st.session_state`:
   messages   list các tin nhắn:
                {"role": "user", "content": str}
                {"role": "assistant", "result": QueryResult, "dataset": nhãn dataset}
-               {"role": "assistant", "summary": dict}             (thống kê dataset, không gọi LLM)
                {"role": "assistant", "error": str}              (lỗi gọi backend)
                {"role": "notice", "content": str}               (ví dụ: đã đổi dataset)
 """
@@ -20,8 +19,7 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 import streamlit.components.v1 as components
 
-from frontend.api_client import QueryResult
-from frontend.ui.datasets import render_dataset_summary
+from frontend.api_client import EdaResult, QueryResult
 
 CHAT_PLACEHOLDER = "Hỏi về dữ liệu của bạn… (ví dụ: Doanh thu theo vùng, vẽ biểu đồ cột)"
 
@@ -29,8 +27,8 @@ CHAT_PLACEHOLDER = "Hỏi về dữ liệu của bạn… (ví dụ: Doanh thu t
 def render_header() -> None:
     st.title("📊 Data Analytics Chatbot")
     st.caption(
-        "**Stage 1** Câu hỏi → SQL  ·  **Stage 2** Thực thi SQL → bảng kết quả + câu trả lời  ·  "
-        "**Stage 3** Vẽ biểu đồ (chỉ khi bạn yêu cầu)"
+        "Hỏi dữ liệu (câu hỏi → SQL → bảng + câu trả lời)  ·  Khám phá dữ liệu (EDA: tổng quan, giá trị thiếu, "
+        "thống kê, tương quan)  ·  Vẽ biểu đồ (chỉ khi bạn yêu cầu)"
     )
 
 
@@ -55,9 +53,6 @@ def render_assistant_body(msg: Dict[str, Any]) -> None:
     if "error" in msg:
         st.error(f"❌ {msg['error']}")
         return
-    if "summary" in msg:
-        render_dataset_summary(msg["summary"])
-        return
     result: QueryResult = msg["result"]
 
     if result.status == "needs_clarification":
@@ -71,10 +66,15 @@ def render_assistant_body(msg: Dict[str, Any]) -> None:
             "❌ Không thực hiện được truy vấn cho câu hỏi này. Hãy thử diễn đạt lại, "
             "hoặc mở phần **Bằng chứng / SQL** bên dưới để xem chi tiết lỗi."
         )
+    elif result.status == "eda_error":
+        st.error("❌ Không thực hiện được phân tích khám phá cho câu hỏi này (xem chi tiết bên dưới).")
     else:
         _render_answer_and_table(result)
         _render_chart(result)
+    if result.status in ("sql_error", "needs_clarification") and result.eda and result.answer:
+        st.markdown(result.answer.text)  # phần EDA của câu hỏi kết hợp vẫn có kết quả
 
+    _render_eda(result)
     _render_evidence(result)
     if msg.get("dataset"):
         st.caption(f"Dataset: {msg['dataset']}")
@@ -83,7 +83,7 @@ def render_assistant_body(msg: Dict[str, Any]) -> None:
 def _render_answer_and_table(result: QueryResult) -> None:
     if result.answer:
         st.markdown(result.answer.text)
-    if result.status == "empty_result":
+    if result.status == "empty_result" or result.df is None and result.eda:
         return
     if result.evidence.truncated:
         st.warning(
@@ -92,6 +92,46 @@ def _render_answer_and_table(result: QueryResult) -> None:
         )
     if result.df is not None:
         st.dataframe(result.df, width="stretch", height=min(400, 38 + 35 * len(result.df)))
+
+
+_EDA_TITLES = {
+    "table_overview": "Tổng quan bảng",
+    "data_quality": "Chất lượng dữ liệu",
+    "numeric_summary": "Thống kê mô tả (cột số)",
+    "categorical_summary": "Cột phân loại — top giá trị",
+    "correlation": "Tương quan giữa các cột số",
+}
+
+
+def _render_eda(result: QueryResult) -> None:
+    """Mỗi operation EDA: tiêu đề, bảng, cảnh báo/lấy mẫu, cách tính. Câu trả lời text đã hiển thị ở trên."""
+    for i, e in enumerate(result.eda):
+        title = f"{_EDA_TITLES.get(e.operation, e.operation)} — `{e.table}`"
+        if e.status != "ok":
+            st.warning(f"⚠️ {title}: {e.error}")
+            continue
+        st.markdown(f"**📈 {title}**")
+        badges = []
+        if e.sampled:
+            badges.append("📉 ước tính trên mẫu")
+        if e.truncated:
+            badges.append("✂️ bị giới hạn")
+        if badges:
+            st.caption(" · ".join(badges))
+        if e.df is not None:
+            st.dataframe(e.df, hide_index=True, width="stretch", height=min(400, 38 + 35 * len(e.df)))
+        for w in e.warnings:
+            st.caption(f"⚠️ {w}")
+        if e.sample_info:
+            info = e.sample_info
+            if "rows_total" in info:
+                st.caption(f"Mẫu: {info['rows_used']:,}/{info['rows_total']:,} dòng ({info['method']}).")
+            elif info.get("columns"):
+                st.caption(f"Cột dùng mẫu cho quartile: {', '.join(info['columns'])} ({info['method']}).")
+        if e.definitions:
+            with st.expander("ℹ️ Cách tính", expanded=False):
+                for d in e.definitions:
+                    st.caption(f"• {d}")
 
 
 def _render_chart(result: QueryResult) -> None:
@@ -119,15 +159,25 @@ def _render_chart(result: QueryResult) -> None:
 
 def _render_evidence(result: QueryResult) -> None:
     ev = result.evidence
-    if not (ev.sql or ev.sql_error):
+    eda_queries = [(e, q) for e in result.eda for q in e.queries]
+    if not (ev.sql or ev.sql_error or eda_queries):
         return  # ví dụ: cần làm rõ, chưa có SQL nào được thực thi
     with st.expander("🔎 Bằng chứng / SQL", expanded=ev.show_sql):
+        if result.plan:
+            steps = " → ".join(
+                s.operation + (f"({s.table})" if s.table else "") for s in result.plan.steps
+            )
+            st.caption(f"Kế hoạch ({result.plan.source}): {steps}")
         tab_sql, tab_exec, tab_prompt = st.tabs(["SQL đã thực thi", "Thông tin thực thi", "Prompt (debug)"])
         with tab_sql:
             if ev.sql:
                 st.code(ev.sql, language="sql")
             if ev.sql_error:
                 st.error(f"Lỗi: {ev.sql_error}")
+            for e in result.eda:
+                if e.queries:
+                    st.caption(f"EDA · {_EDA_TITLES.get(e.operation, e.operation)} · `{e.table}` ({e.elapsed_ms} ms)")
+                    st.code(";\n".join(e.queries), language="sql")
         with tab_exec:
             rows = f"{ev.row_count:,} dòng × {ev.column_count} cột" if ev.row_count is not None else "—"
             st.markdown(
@@ -139,7 +189,7 @@ def _render_evidence(result: QueryResult) -> None:
             )
         with tab_prompt:
             st.caption("Prompt gửi cho bước sinh SQL:")
-            st.code(ev.sql_prompt, language="text")
+            st.code(ev.sql_prompt or "(không có bước sinh SQL trong lượt này)", language="text")
 
 
 # ── Gợi ý câu hỏi (bong bóng phía trên ô nhập) ─────────────────────────────

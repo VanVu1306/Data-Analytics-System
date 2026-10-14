@@ -88,6 +88,14 @@ class Settings:
     answer_max_tokens: int
     answer_temperature: float
 
+    # ── EDA (giai đoạn 4) ──────────────────────────────────────────────────
+    eda_max_columns: int          # số cột tối đa mỗi operation
+    eda_top_k: int                # số giá trị phổ biến tối đa mỗi cột phân loại
+    eda_sample_rows: int          # số dòng tối đa đưa sang pandas (quartile/tương quan); vượt -> lấy mẫu
+    eda_timeout_seconds: float    # ngân sách thời gian cho một operation
+    eda_corr_max_columns: int     # số cột số tối đa cho ma trận tương quan
+    eda_max_tables: int           # số bảng tối đa khi một câu hỏi EDA áp dụng cho cả dataset
+
     @property
     def has_deepseek_key(self) -> bool:
         return bool(self.deepseek_api_key)
@@ -131,6 +139,12 @@ def load_settings() -> Settings:
         answer_max_rows=_env_int("ANSWER_MAX_ROWS", 20),
         answer_max_tokens=_env_int("ANSWER_MAX_TOKENS", 300),
         answer_temperature=_env_float("ANSWER_TEMPERATURE", 0.0),
+        eda_max_columns=_env_int("EDA_MAX_COLUMNS", 50),
+        eda_top_k=_env_int("EDA_TOP_K", 10),
+        eda_sample_rows=_env_int("EDA_SAMPLE_ROWS", 50_000),
+        eda_timeout_seconds=_env_float("EDA_TIMEOUT", 20.0),
+        eda_corr_max_columns=_env_int("EDA_CORR_MAX_COLUMNS", 15),
+        eda_max_tables=_env_int("EDA_MAX_TABLES", 10),
     )
 
 

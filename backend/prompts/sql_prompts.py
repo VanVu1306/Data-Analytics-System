@@ -9,7 +9,9 @@ SQL_SYSTEM_PROMPT = (
     "You are an expert SQL assistant. "
     "Given a database schema and a question, write only the SQL query. "
     "Output ONLY the SQL query starting with SELECT, no explanation, no markdown. "
-    "If the question also asks for a chart, ignore that part and write the query for the data needed."
+    "If the question also asks for a chart, ignore that part and write the query for the data needed. "
+    "Likewise ignore parts that ask for data profiling (missing values, duplicates, descriptive statistics, "
+    "correlation); they are handled elsewhere."
 )
 
 # Few-shot examples cố định cho domain bán hàng (demo DB).
@@ -62,7 +64,9 @@ DATASET_SQL_SYSTEM_PROMPT = (
     f"- If the question cannot be answered with the schema, or needs a join between tables that have no FOREIGN KEY "
     f"relation, output a single line `{CLARIFY_PREFIX} <one short question asking the user to clarify or to confirm "
     "how the tables are related>` written in the same language as the question, and no SQL.\n"
-    "- If the question also asks for a chart or to show the SQL, ignore that part and write only the data query.\n"
+    "- If the question also asks for a chart or to show the SQL, ignore that part and write only the data query. "
+    "Also ignore parts that ask for data profiling (missing values, duplicates, descriptive statistics, "
+    "correlation); they are handled elsewhere.\n"
     "- Never write INSERT/UPDATE/DELETE/DDL; only SELECT."
 )
 

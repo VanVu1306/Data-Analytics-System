@@ -10,12 +10,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
-from backend.agents import AnswerAgent, SQLAgent, VizAgent
+from backend.agents import AnswerAgent, PlannerAgent, SQLAgent, VizAgent
 from backend.config import Settings, get_settings
 from backend.database import DatasetStore, ImportLimits, SQLiteRepository
 from backend.llm import LLMClient, OllamaClient, create_cloud_llm
 from backend.pipeline import DatasetService, PipelineOrchestrator
 from backend.tools import (
+    EDA_TOOL_CLASSES,
+    DescribeSchemaTool,
+    EdaAnswerTool,
     ExecuteSQLTool,
     GetDatasetTool,
     GetSchemaTool,
@@ -43,6 +46,7 @@ class Container:
     sql_agent: SQLAgent
     viz_agent: VizAgent
     answer_agent: AnswerAgent
+    planner_agent: PlannerAgent
     orchestrator: PipelineOrchestrator
 
 
@@ -78,6 +82,7 @@ def build_container(
     tools = ToolRegistry()
     tools.register(GetSchemaTool(datasets))
     tools.register(ListTablesTool(datasets))
+    tools.register(DescribeSchemaTool(datasets))
     tools.register(ExecuteSQLTool(datasets))
     tools.register(ImportDatasetTool(datasets))
     tools.register(GetDatasetTool(datasets))
@@ -87,11 +92,15 @@ def build_container(
     tools.register(MockVizCodeTool())
     tools.register(RenderChartTool(dpi=settings.chart_dpi))
     tools.register(TemplateAnswerTool())
+    tools.register(EdaAnswerTool())
+    for eda_cls in EDA_TOOL_CLASSES:
+        tools.register(eda_cls(datasets, settings))
 
     sql_agent = SQLAgent(llm=cloud_llm, tools=tools, settings=settings)
     viz_agent = VizAgent(local_llm=ollama, cloud_llm=cloud_llm, tools=tools, settings=settings)
     answer_agent = AnswerAgent(llm=cloud_llm, tools=tools, settings=settings)
-    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools, answer_agent)
+    planner_agent = PlannerAgent(llm=cloud_llm, tools=tools, settings=settings)
+    orchestrator = PipelineOrchestrator(sql_agent, viz_agent, tools, answer_agent, planner_agent)
     dataset_service = DatasetService(tools, max_upload_bytes)
 
     return Container(
@@ -105,6 +114,7 @@ def build_container(
         sql_agent=sql_agent,
         viz_agent=viz_agent,
         answer_agent=answer_agent,
+        planner_agent=planner_agent,
         orchestrator=orchestrator,
     )
 

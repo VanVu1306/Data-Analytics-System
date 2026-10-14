@@ -85,26 +85,26 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 4 — Bổ sung khả năng thực hiện EDA
 
-- [ ] **Giữ nguyên SQLite làm định dạng lưu trữ chuẩn.** Không cần đổi database để hỗ trợ EDA: dùng SQL aggregate cho thống kê phù hợp, và pandas trên kết quả/mẫu có giới hạn cho phép tính khó biểu đạt bằng SQL.
-- [ ] Rà soát import ở `backend/database/importers/`: thống nhất xử lý NULL/rỗng, kiểu dữ liệu hỗn hợp, số và ngày tháng; lưu kiểu nguồn/kiểu suy luận và cảnh báo import để EDA không hiểu nhầm dữ liệu đã chuẩn hóa.
-- [ ] Mở rộng orchestrator bằng **kế hoạch xử lý có cấu trúc**, tối thiểu gồm danh sách operation, bảng/cột mục tiêu đã xác thực, yêu cầu biểu đồ và yêu cầu hiển thị SQL.
-- [ ] Định tuyến bằng quy tắc cho ý định rõ ràng và LLM trả kế hoạch có schema cho câu hỏi phức tạp/kết hợp. Kiểm tra operation, tên bảng/cột và tham số với schema/allowlist trước khi chạy; kế hoạch không hợp lệ hoặc mơ hồ thì hỏi lại người dùng.
-- [ ] Cho phép query và EDA phối hợp trong cùng một lượt, không coi EDA là chatbot riêng:
+- [X] **Giữ nguyên SQLite làm định dạng lưu trữ chuẩn.** Không cần đổi database để hỗ trợ EDA: dùng SQL aggregate cho thống kê phù hợp, và pandas trên kết quả/mẫu có giới hạn cho phép tính khó biểu đạt bằng SQL.
+- [X] Rà soát import ở `backend/database/importers/`: thống nhất xử lý NULL/rỗng, kiểu dữ liệu hỗn hợp, số và ngày tháng; lưu kiểu nguồn/kiểu suy luận và cảnh báo import để EDA không hiểu nhầm dữ liệu đã chuẩn hóa.
+- [X] Mở rộng orchestrator bằng **kế hoạch xử lý có cấu trúc**, tối thiểu gồm danh sách operation, bảng/cột mục tiêu đã xác thực, yêu cầu biểu đồ và yêu cầu hiển thị SQL.
+- [X] Định tuyến bằng quy tắc cho ý định rõ ràng và LLM trả kế hoạch có schema cho câu hỏi phức tạp/kết hợp. Kiểm tra operation, tên bảng/cột và tham số với schema/allowlist trước khi chạy; kế hoạch không hợp lệ hoặc mơ hồ thì hỏi lại người dùng.
+- [X] Cho phép query và EDA phối hợp trong cùng một lượt, không coi EDA là chatbot riêng:
 
-  - [ ] Câu hỏi cần một kết quả cụ thể (ví dụ doanh thu theo tháng) → `query`.
-  - [ ] Tổng quan/chất lượng/phân phối dữ liệu → operation EDA tương ứng.
-  - [ ] Câu hỏi kết hợp → chạy một hoặc nhiều operation cần thiết rồi hợp nhất phản hồi.
-  - [ ] Không chạy full-profile EDA cho mỗi truy vấn đơn giản.
-- [ ] Xây dựng các EDA tool xác định, có giới hạn; không cho LLM tự sinh và thực thi code phân tích tùy ý:
+  - [X] Câu hỏi cần một kết quả cụ thể (ví dụ doanh thu theo tháng) → `query`.
+  - [X] Tổng quan/chất lượng/phân phối dữ liệu → operation EDA tương ứng.
+  - [X] Câu hỏi kết hợp → chạy một hoặc nhiều operation cần thiết rồi hợp nhất phản hồi.
+  - [X] Không chạy full-profile EDA cho mỗi truy vấn đơn giản.
+- [X] Xây dựng các EDA tool xác định, có giới hạn; không cho LLM tự sinh và thực thi code phân tích tùy ý:
 
-  - [ ] Tổng quan bảng: số dòng/cột, kiểu dữ liệu và số giá trị phân biệt.
-  - [ ] Chất lượng: giá trị thiếu/NULL và dòng trùng lặp (định nghĩa duplicate phải rõ).
-  - [ ] Cột số: count, mean, std, min, quartiles/median và max.
-  - [ ] Cột phân loại: số nhóm và top values có giới hạn.
-  - [ ] Tương quan giữa các cột số khi số lượng cột phù hợp; nêu rõ loại tương quan và cách xử lý NULL.
-- [ ] Đặt timeout, giới hạn số cột/nhóm/sample; ghi kết quả là exact hay sampled/truncated. Ưu tiên SQL cho count/mean/min/max/group-by; chỉ đưa dữ liệu đã giới hạn sang pandas cho quartile/tương quan hoặc phép tính cần thiết.
-- [ ] Trả payload EDA có cấu trúc (operation, bảng/cột, số liệu, warnings, sampling/truncation); tạo câu trả lời text ngắn chỉ từ các kết quả này và hiển thị trong luồng chat cùng bảng/bằng chứng. SQL truy vấn ở expander khi người dùng yêu cầu hoặc bật tùy chọn.
-- [ ] Kiểm thử planner/validator và từng tool: schema khác nhau, bảng rỗng/lớn, NULL/duplicate, kiểu dữ liệu hỗn hợp, giới hạn/sample, cột không tồn tại, câu hỏi mơ hồ và câu hỏi phối hợp query + EDA.
+  - [X] Tổng quan bảng: số dòng/cột, kiểu dữ liệu và số giá trị phân biệt.
+  - [X] Chất lượng: giá trị thiếu/NULL và dòng trùng lặp (định nghĩa duplicate phải rõ).
+  - [X] Cột số: count, mean, std, min, quartiles/median và max.
+  - [X] Cột phân loại: số nhóm và top values có giới hạn.
+  - [X] Tương quan giữa các cột số khi số lượng cột phù hợp; nêu rõ loại tương quan và cách xử lý NULL.
+- [X] Đặt timeout, giới hạn số cột/nhóm/sample; ghi kết quả là exact hay sampled/truncated. Ưu tiên SQL cho count/mean/min/max/group-by; chỉ đưa dữ liệu đã giới hạn sang pandas cho quartile/tương quan hoặc phép tính cần thiết.
+- [X] Trả payload EDA có cấu trúc (operation, bảng/cột, số liệu, warnings, sampling/truncation); tạo câu trả lời text ngắn chỉ từ các kết quả này và hiển thị trong luồng chat cùng bảng/bằng chứng. SQL truy vấn ở expander khi người dùng yêu cầu hoặc bật tùy chọn.
+- [X] Kiểm thử planner/validator và từng tool: schema khác nhau, bảng rỗng/lớn, NULL/duplicate, kiểu dữ liệu hỗn hợp, giới hạn/sample, cột không tồn tại, câu hỏi mơ hồ và câu hỏi phối hợp query + EDA.
 
 **Thành phần dự kiến:** importer/metadata trong `backend/database/importers/` và `backend/database/dataset_store.py`; EDA tools trong `backend/tools/` (hoặc `backend/analysis/`) đăng ký tại `backend/container.py`; planner/validator trong `backend/tools/intent.py` hoặc module riêng; điều phối trong `backend/pipeline/orchestrator.py`; response trong `backend/api/schemas.py`/`backend/api/routes.py`; hiển thị chung trong `frontend/api_client.py`/`frontend/ui/main_view.py`.
 
@@ -142,6 +142,7 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 ## Mở rộng — Nếu được yêu cầu
 
 - [ ] Tạo luồng điều phối LangGraph để agent hóa toàn bộ hệ thống.
+- [ ] Giảm sự phụ thuộc của Planner Agent vào các quy tắc cố định (hiện tại đang sử dụng planner dựa trên regex).
 
 ## Tiêu chí hoàn thành MVP
 

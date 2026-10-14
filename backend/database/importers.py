@@ -53,7 +53,20 @@ class ImportLimits:
 @dataclass
 class ColumnMeta:
     name: str
-    type: str
+    type: str  # kiểu lưu trong SQLite (khai báo trong CREATE TABLE)
+    source_type: str | None = None  # kiểu quan sát được ở nguồn (csv: "text"; excel: number/text/date...; sqlite: kiểu khai báo)
+    inferred_type: str | None = None  # kiểu sau chuẩn hóa: integer|real|text|date|datetime|boolean|mixed|empty|blob|numeric
+    notes: list[str] = field(default_factory=list)  # ghi chú chuẩn hóa của cột (NULL, kiểu hỗn hợp, ngày...)
+
+
+@dataclass
+class ColumnReport:
+    """Kết quả phân tích một cột khi ghi bảng: dùng để điền ColumnMeta."""
+
+    sql_type: str
+    kind: str
+    source_type: str
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -275,6 +288,100 @@ def coerce_text_column(values: Sequence[str | None]) -> list[object]:
 
 
 # --------------------------------------------------------------------------- #
+# Phân tích cột: NULL-token, kiểu hỗn hợp, ngày tháng
+# --------------------------------------------------------------------------- #
+_NULL_TOKENS = frozenset({"na", "n/a", "#n/a", "null", "nan", "none", "nil"})
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$")
+_AMBIGUOUS_DATE_RE = re.compile(r"^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}$")
+
+
+def _is_number(v: object) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_null_token(v: object) -> bool:
+    return isinstance(v, str) and v.strip().casefold() in _NULL_TOKENS
+
+
+def normalize_null_tokens(values: Sequence[object]) -> tuple[list[object], list[str]]:
+    """Cột số có lẫn 'NA', 'N/A', 'null'... -> chuyển các token này thành NULL (chỉ khi phần còn lại đều là số).
+
+    Không đụng tới cột văn bản: 'none'/'na' có thể là giá trị thật. Trả về (giá trị mới, ghi chú).
+    """
+    tokens = [v for v in values if _is_null_token(v)]
+    if not tokens:
+        return list(values), []
+    rest = [v for v in values if v is not None and not _is_null_token(v)]
+    numeric = rest and all(_is_number(v) or (isinstance(v, str) and (_INT_RE.match(v) or _FLOAT_RE.match(v))) for v in rest)
+    if not numeric:
+        return list(values), []
+    out = [None if _is_null_token(v) else v for v in values]
+    return out, [f"{len(tokens)} giá trị kiểu 'NA'/'N/A'/'null' trong cột số đã chuyển thành NULL."]
+
+
+def _kind_of(v: object) -> str:
+    if isinstance(v, bool):
+        return "boolean"
+    if isinstance(v, int):
+        return "integer"
+    if isinstance(v, float):
+        return "real"
+    if isinstance(v, dt.datetime):
+        return "datetime"
+    if isinstance(v, dt.date):
+        return "date"
+    if isinstance(v, dt.time):
+        return "time"
+    return "text"
+
+
+def analyze_column(values: Sequence[object], notes: list[str] | None = None, source_hint: str | None = None) -> ColumnReport:
+    """Phân loại cột trước khi chuyển đổi: kiểu quan sát, kiểu suy luận và ghi chú.
+
+    `values` là giá trị gốc (trước `infer_column`). `source_hint`: kiểu nguồn cố định (CSV -> "text").
+    """
+    notes = list(notes or [])
+    sql_type, _ = infer_column(values)
+    present = [v for v in values if v is not None]
+    if not present:
+        return ColumnReport("TEXT", "empty", source_hint or "empty", notes)
+
+    kinds = {_kind_of(v) for v in present}
+    observed = source_hint or ",".join(sorted(k if k != "integer" and k != "real" else "number" for k in kinds))
+    numeric_kinds = {"integer", "real"}
+    if kinds <= numeric_kinds | {"boolean"} and kinds & numeric_kinds and "boolean" in kinds:
+        kind = "mixed"
+    elif kinds == {"boolean"}:
+        kind = "boolean"
+        notes.append("Giá trị đúng/sai đã lưu dạng INTEGER 0/1.")
+    elif kinds <= numeric_kinds:
+        kind = "real" if sql_type == "REAL" else ("integer" if sql_type == "INTEGER" else "text")
+        if sql_type == "TEXT":
+            notes.append("Số nguyên vượt phạm vi int64 nên được lưu dạng TEXT.")
+    elif kinds <= {"date", "datetime"}:
+        kind = "datetime" if any(isinstance(v, dt.datetime) and v.time() != dt.time(0, 0) for v in present) else "date"
+        notes.append("Ngày/giờ được lưu dạng TEXT theo ISO 8601.")
+    elif kinds == {"text"}:
+        texts = [str(v) for v in present]
+        if all(_ISO_DATE_RE.match(t) for t in texts):
+            kind = "datetime" if any(len(t) > 10 for t in texts) else "date"
+            notes.append("Giá trị dạng ngày ISO (YYYY-MM-DD); lưu dạng TEXT, không đổi định dạng.")
+        else:
+            kind = "text"
+            if all(_AMBIGUOUS_DATE_RE.match(t) for t in texts):
+                notes.append("Có vẻ là ngày dạng d/m/y hoặc m/d/y (mơ hồ); giữ nguyên TEXT, không chuyển đổi.")
+    else:
+        kind = "mixed"
+    if kind == "mixed":
+        counts = {}
+        for v in present:
+            counts[_kind_of(v)] = counts.get(_kind_of(v), 0) + 1
+        detail = ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
+        notes.append(f"Kiểu dữ liệu hỗn hợp ({detail}); toàn bộ được lưu dạng TEXT.")
+    return ColumnReport(sql_type, kind, observed, notes)
+
+
+# --------------------------------------------------------------------------- #
 # Ghi bảng
 # --------------------------------------------------------------------------- #
 def write_table(
@@ -282,16 +389,22 @@ def write_table(
     table: str,
     headers: Sequence[str],
     rows: Sequence[Sequence[object]],
-) -> None:
-    """Tạo bảng `table` và ghi `rows` (mỗi dòng được đệm None cho đủ cột)."""
+    *,
+    column_notes: dict[int, list[str]] | None = None,
+    source_hint: str | None = None,
+) -> list[ColumnReport]:
+    """Tạo bảng `table` và ghi `rows` (mỗi dòng được đệm None cho đủ cột). Trả về báo cáo từng cột."""
+    column_notes = column_notes or {}
     width = len(headers)
     types: list[str] = []
     columns: list[list[object]] = []
+    reports: list[ColumnReport] = []
     for j in range(width):
         column = [row[j] if j < len(row) else None for row in rows]
         sql_type, converted = infer_column(column)
         types.append(sql_type)
         columns.append(converted)
+        reports.append(analyze_column(column, column_notes.get(j), source_hint))
 
     column_sql = ", ".join(f"{quote_ident(h)} {t}" for h, t in zip(headers, types))
     conn.execute("BEGIN")
@@ -301,13 +414,42 @@ def write_table(
     while batch := list(islice(iterator, _BATCH)):
         conn.executemany(insert, batch)
     conn.execute("COMMIT")
+    return reports
+
+
+def report_warnings(table: str, headers: Sequence[str], reports: Sequence[ColumnReport], limit: int = 5) -> list[str]:
+    """Một cảnh báo gộp cho mỗi bảng (không một dòng cho mỗi cột); chi tiết nằm trong `notes` của từng cột."""
+    keys = ("hỗn hợp", "NA", "0 đứng đầu", "mơ hồ")
+    flagged = [h for h, r in zip(headers, reports) if any(k in n for n in r.notes for k in keys)]
+    if not flagged:
+        return []
+    shown = ", ".join(flagged[:limit]) + (f" … (+{len(flagged) - limit})" if len(flagged) > limit else "")
+    return [f"Bảng '{table}': {len(flagged)} cột được chuẩn hóa đặc biệt ({shown}). Xem ghi chú theo cột trong 'Tổng quan dataset'."]
 
 
 # --------------------------------------------------------------------------- #
 # Metadata
 # --------------------------------------------------------------------------- #
+_AFFINITY_KIND = (("int", "integer"), ("real", "real"), ("floa", "real"), ("doub", "real"), ("char", "text"),
+                  ("clob", "text"), ("text", "text"), ("blob", "blob"), ("num", "numeric"), ("dec", "numeric"),
+                  ("bool", "numeric"), ("date", "numeric"))
+
+
+def declared_kind(declared: str) -> str:
+    """Kiểu suy luận từ kiểu khai báo của SQLite (quy tắc affinity)."""
+    d = (declared or "").lower()
+    if not d:
+        return "blob"
+    for key, kind in _AFFINITY_KIND:
+        if key in d:
+            return kind
+    return "numeric"
+
+
 def describe_db(
-    conn: sqlite3.Connection, source_names: dict[str, str] | None = None
+    conn: sqlite3.Connection,
+    source_names: dict[str, str] | None = None,
+    reports: dict[str, list[ColumnReport]] | None = None,
 ) -> tuple[list[TableMeta], list[RelationMeta]]:
     """Đọc bảng, cột, số dòng và khóa ngoại của DB đã import (bỏ authorizer trước)."""
     source_names = source_names or {}
@@ -322,7 +464,13 @@ def describe_db(
     relations: list[RelationMeta] = []
     for name in names:
         q = quote_ident(name)
-        columns = [ColumnMeta(r[1], r[2] or "") for r in conn.execute(f"PRAGMA table_info({q})")]
+        rep = (reports or {}).get(name)
+        columns = []
+        for i, r in enumerate(conn.execute(f"PRAGMA table_info({q})").fetchall()):
+            if rep is not None and i < len(rep):
+                columns.append(ColumnMeta(r[1], r[2] or "", rep[i].source_type, rep[i].kind, list(rep[i].notes)))
+            else:  # SQLite upload: kiểu nguồn = kiểu khai báo
+                columns.append(ColumnMeta(r[1], r[2] or "", r[2] or "", declared_kind(r[2] or ""), []))
         count = conn.execute(f"SELECT COUNT(*) FROM {q}").fetchone()[0]
         tables.append(TableMeta(name, source_names.get(name, name), count, columns))
         for fk in conn.execute(f"PRAGMA foreign_key_list({q})"):
@@ -395,15 +543,37 @@ def import_csv(src: Path, db_path: Path, limits: ImportLimits, source_name: str)
         cols.allocate(header[j] if j < len(header) else None, f"column_{j + 1}", prefix="c_") for j in range(width)
     ]
     cleaned = [[_cell(c) for c in row] for row in body]
-    columns = [coerce_text_column([row[j] if j < len(row) else None for row in cleaned]) for j in range(width)]
+    columns: list[list[object]] = []
+    column_notes: dict[int, list[str]] = {}
+    for j in range(width):
+        raw_col = [row[j] if j < len(row) else None for row in cleaned]
+        notes: list[str] = []
+        blanks = sum(1 for row in body if j < len(row) and not row[j].replace("\x00", "").strip())
+        if blanks:
+            notes.append(f"{blanks} ô trống đã chuyển thành NULL.")
+        raw_col, null_notes = normalize_null_tokens(raw_col)
+        notes += null_notes
+        converted = coerce_text_column(raw_col)
+        present = [v for v in raw_col if v is not None]
+        if present and any(isinstance(v, str) for v in converted if v is not None) and all(
+            _INT_RE.match(v) or _FLOAT_RE.match(v) for v in present
+        ):
+            notes.append("Giữ dạng chữ vì có số 0 đứng đầu (mã/ID/số điện thoại).")
+        if present and any(isinstance(v, str) for v in converted if v is not None):
+            numeric_like = sum(1 for v in present if _INT_RE.match(v) or _FLOAT_RE.match(v))
+            if 0 < numeric_like < len(present) and numeric_like != len(present):
+                notes.append(f"Kiểu hỗn hợp: gồm cả số ({numeric_like}) và chữ ({len(present) - numeric_like}); giữ TEXT.")
+        columns.append(converted)
+        column_notes[j] = notes
     rows = [list(r) for r in zip(*columns)] if cleaned else []
 
     table = NameAllocator().allocate(Path(source_name).stem, "data")
     conn = open_target(db_path, limits)
     try:
-        write_table(conn, table, headers, rows)
+        reports = write_table(conn, table, headers, rows, column_notes=column_notes, source_hint="text")
         seal_target(conn)
-        tables, relations = describe_db(conn, {table: Path(source_name).stem})
+        tables, relations = describe_db(conn, {table: Path(source_name).stem}, {table: reports})
+        warnings += report_warnings(table, headers, reports)
     except sqlite3.Error as exc:
         raise translate_sqlite_error(exc, "Import CSV") from exc
     finally:
@@ -438,10 +608,16 @@ def _check_zip(path: Path, limits: ImportLimits) -> None:
         raise InvalidFileError("Tệp Excel bị hỏng (không giải nén được).") from exc
 
 
-def _clean_cell(value: object) -> object:
+def _clean_cell(value: object, counter: dict | None = None) -> object:
     if isinstance(value, str):
         value = value.replace("\x00", "").strip()
-        if not value or _ERROR_LITERAL.match(value):
+        if not value:
+            if counter is not None:
+                counter["blank"] = counter.get("blank", 0) + 1
+            return None
+        if _ERROR_LITERAL.match(value):
+            if counter is not None:
+                counter["error"] = counter.get("error", 0) + 1
             return None
         return value
     if isinstance(value, float) and not math.isfinite(value):
@@ -449,13 +625,13 @@ def _clean_cell(value: object) -> object:
     return value
 
 
-def _read_sheet(ws, limits: ImportLimits) -> list[list[object]]:
+def _read_sheet(ws, limits: ImportLimits, counter: dict | None = None) -> list[list[object]]:
     rows: list[list[object]] = []
     reset = getattr(ws, "reset_dimensions", None)
     if reset:  # một số trình xuất khai báo sai <dimension> khiến chế độ read-only chỉ đọc 1 ô
         reset()
     for raw in ws.iter_rows(values_only=True):
-        row = [_clean_cell(v) for v in raw]
+        row = [_clean_cell(v, counter) for v in raw]
         while row and row[-1] is None:
             row.pop()
         if not row or all(v is None for v in row):
@@ -486,6 +662,7 @@ def import_excel(src: Path, db_path: Path, limits: ImportLimits) -> ImportResult
     warnings: list[str] = []
     table_names = NameAllocator()
     source_names: dict[str, str] = {}
+    all_reports: dict[str, list[ColumnReport]] = {}
     conn = open_target(db_path, limits)
     try:
         sheets = workbook.worksheets
@@ -496,7 +673,10 @@ def import_excel(src: Path, db_path: Path, limits: ImportLimits) -> ImportResult
             if getattr(ws, "sheet_state", "visible") != "visible":
                 warnings.append(f"Sheet ẩn '{title}' được bỏ qua.")
                 continue
-            rows = _read_sheet(ws, limits)
+            counter: dict = {}
+            rows = _read_sheet(ws, limits, counter)
+            if counter.get("error"):
+                warnings.append(f"Sheet '{title}': {counter['error']} ô lỗi công thức (#DIV/0!, #N/A...) đã chuyển thành NULL.")
             if not rows:
                 warnings.append(f"Sheet '{title}' trống nên được bỏ qua.")
                 continue
@@ -516,12 +696,21 @@ def import_excel(src: Path, db_path: Path, limits: ImportLimits) -> ImportResult
             data = [[r[j] if j < len(r) else None for j in keep] for r in body]
 
             table = table_names.allocate(title, f"sheet_{len(source_names) + 1}")
-            write_table(conn, table, headers, data)
+            col_notes: dict[int, list[str]] = {}
+            for k in range(len(keep)):
+                col = [r[k] for r in data]
+                col, null_notes = normalize_null_tokens(col)
+                for r, v in zip(data, col):
+                    r[k] = v
+                col_notes[k] = null_notes
+            reports = write_table(conn, table, headers, data, column_notes=col_notes)
+            all_reports[table] = reports
+            warnings += report_warnings(table, headers, reports)
             source_names[table] = title
         if not source_names:
             raise InvalidFileError("Tệp Excel không có sheet nào chứa dữ liệu.")
         seal_target(conn)
-        tables, relations = describe_db(conn, source_names)
+        tables, relations = describe_db(conn, source_names, all_reports)
     except sqlite3.Error as exc:
         raise translate_sqlite_error(exc, "Import Excel") from exc
     finally:

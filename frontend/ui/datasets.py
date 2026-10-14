@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import streamlit as st
 
 from frontend.api_client import APIError, NL2VizClient
-from frontend.config import FORMAT_LABELS, SUGGESTIONS, UPLOAD_TYPES
+from frontend.config import SUGGESTIONS, UPLOAD_TYPES
 
 DEMO_LABEL = "Demo — sales_demo.db"
+OVERVIEW_PROMPT = "Tổng quan dataset"  # câu hỏi EDA thông thường, đi qua cùng pipeline như mọi câu hỏi khác
 
 
 def _datasets() -> Dict[str, Dict[str, Any]]:
@@ -38,11 +38,12 @@ def dataset_label(dataset_id: Optional[str]) -> str:
 def suggestions_for(schema_tables: Dict[str, List[str]], dataset_id: Optional[str]) -> List[str]:
     """Gợi ý câu hỏi (kể cả yêu cầu vẽ từng loại biểu đồ) theo schema của dataset đang chọn."""
     if dataset_id is None:
-        return SUGGESTIONS
+        return [OVERVIEW_PROMPT] + SUGGESTIONS
     if not schema_tables:
         return []
     table, cols = next(iter(schema_tables.items()))
-    out = [f"Show the first 10 rows of {table}", f"How many rows are in {table}?"]
+    out = [OVERVIEW_PROMPT, f"Kiểm tra giá trị thiếu và trùng lặp của bảng {table}",
+           f"Show the first 10 rows of {table}", f"Thống kê mô tả các cột số của bảng {table}"]
     if cols:
         c = cols[0]
         out += [
@@ -52,62 +53,6 @@ def suggestions_for(schema_tables: Dict[str, List[str]], dataset_id: Optional[st
     if len(cols) >= 2:
         out.append(f"Vẽ biểu đồ phân tán {cols[0]} và {cols[1]} của bảng {table}")
     return out
-
-
-# ── Thống kê dataset (hiển thị trong chat) ─────────────────────────────────
-SUMMARY_PROMPT = "📋 Tóm tắt thông tin dataset"
-
-
-def build_dataset_summary(client: NL2VizClient, dataset_id: Optional[str], schema_tables: Dict[str, List[str]]) -> Dict[str, Any]:
-    """Tóm tắt dataset đang chọn (không gọi LLM). Demo DB: chỉ có tên bảng/cột; dataset upload: thêm số dòng, kiểu cột."""
-    if dataset_id is None:
-        return {
-            "label": DEMO_LABEL,
-            "tables": [
-                {"name": t, "row_count": None, "columns": [{"name": c, "type": ""} for c in cols]}
-                for t, cols in schema_tables.items()
-            ],
-            "relations": [],
-            "confirmed_relations": [],
-            "warnings": [],
-        }
-    info = _datasets().get(dataset_id) or client.get_dataset(dataset_id)
-    return {**info, "label": dataset_label(dataset_id)}
-
-
-def render_dataset_summary(info: Dict[str, Any]) -> None:
-    meta = [f"**{info['label']}**"]
-    if info.get("format"):
-        meta.append(FORMAT_LABELS.get(info["format"], info["format"]))
-    if info.get("size_bytes"):
-        meta.append("<1 KB" if info["size_bytes"] < 1024 else f"{info['size_bytes'] / 1024:,.0f} KB")
-    if info.get("dataset_id"):
-        meta.append(f"`dataset_id`: `{info['dataset_id']}`")
-    n_rows = [t["row_count"] for t in info["tables"] if t.get("row_count") is not None]
-    meta.append(f"{len(info['tables'])} bảng" + (f" · {sum(n_rows):,} dòng" if n_rows else ""))
-    st.markdown(" · ".join(meta))
-    rows = [
-        {
-            "Bảng": t["name"],
-            "Số dòng": t["row_count"],
-            "Số cột": len(t["columns"]),
-            "Cột": ", ".join(f"{c['name']} ({c['type']})" if c.get("type") else c["name"] for c in t["columns"]),
-        }
-        for t in info["tables"]
-    ]
-    table = pd.DataFrame(rows)
-    if not n_rows:  # demo DB: không có thông tin số dòng
-        table = table.drop(columns=["Số dòng"])
-    st.dataframe(table, hide_index=True, width="stretch")
-    rels = [("khóa ngoại", r) for r in info.get("relations", [])] + [("đã xác nhận", r) for r in info.get("confirmed_relations", [])]
-    if rels:
-        st.caption("Quan hệ giữa các bảng: " + "; ".join(
-            f"{r['from_table']}.{r['from_column']} → {r['to_table']}.{r['to_column'] or '(PK)'} ({kind})" for kind, r in rels
-        ))
-    else:
-        st.caption("Chưa có quan hệ giữa các bảng — hệ thống sẽ không tự JOIN.")
-    for w in info.get("warnings", []):
-        st.warning(w)
 
 
 # ── Upload (trong sidebar, ngay dưới ô chọn dataset) ───────────────────────
@@ -144,9 +89,12 @@ def render_upload_panel(client: NL2VizClient, max_upload_mb: int) -> None:
         else:
             datasets[info["dataset_id"]] = info
             st.session_state["_select_dataset_label"] = dataset_label(info["dataset_id"])
-            st.session_state["_upload_toasts"] = [
-                ("✅", f"Đã import **{info['filename']}** — đang dùng làm dataset phân tích.")
-            ] + [("⚠️", w) for w in info.get("warnings", [])]
+            n_warn = len(info.get("warnings", []))
+            st.session_state["_upload_toasts"] = [(
+                "✅",
+                f"Đã import **{info['filename']}** — đang dùng làm dataset phân tích."
+                + (f" Có {n_warn} lưu ý, xem ở mục Schema." if n_warn else ""),
+            )]
             st.session_state["uploader_n"] = n + 1  # làm trống ô chọn tệp
             st.rerun()
 
@@ -182,6 +130,10 @@ def render_schema_and_relations(client: NL2VizClient, dataset_id: Optional[str])
         return schema
 
     info = _datasets().get(dataset_id) or client.get_dataset(dataset_id)
+    if info.get("warnings"):
+        with st.expander(f"⚠️ Lưu ý khi import ({len(info['warnings'])})"):
+            for w in info["warnings"]:
+                st.caption(f"• {w}")
     declared, confirmed = info.get("relations", []), info.get("confirmed_relations", [])
     with st.expander(f"🔗 Quan hệ giữa các bảng ({len(declared) + len(confirmed)})"):
         st.caption(

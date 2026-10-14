@@ -55,22 +55,26 @@ Data-Analytics-System/
 │   ├── prompts/
 │   │   ├── sql_prompts.py     # DAIL-SQL cho demo DB; prompt theo schema (không few-shot) cho dataset upload
 │   │   ├── answer_prompts.py  # prompt câu trả lời text (chỉ gửi tối đa N dòng kết quả)
+│   │   ├── planner_prompts.py # prompt planner: LLM chỉ trả kế hoạch JSON (allowlist operation)
 │   │   └── viz_prompts.py     # Zero-shot Context + Requirement + Constraint
 │   ├── database/
 │   │   ├── sqlite_repo.py     # SQLiteRepository: schema, execute CHỈ-ĐỌC (timeout, giới hạn dòng/kích thước)
-│   │   ├── importers.py       # CSV / Excel / SQLite -> SQLite chuẩn hóa (kiểu, tên, giới hạn, rào chắn)
+│   │   ├── importers.py       # CSV / Excel / SQLite -> SQLite chuẩn hóa (kiểu, tên, giới hạn, rào chắn) + metadata kiểu nguồn/suy luận/ghi chú
 │   │   └── dataset_store.py   # Registry: dataset_id -> thư mục server tạo; repository(dataset_id); quan hệ thủ công
 │   ├── tools/
 │   │   ├── base.py            # Tool (ABC) + ToolRegistry
 │   │   ├── data_tools.py      # get_schema, list_tables, execute_sql, import_dataset, get_dataset, link/unlink_tables
 │   │   ├── viz_tools.py       # render_chart: exec code matplotlib → PNG
+│   │   ├── planner.py         # kế hoạch xử lý: định tuyến bằng quy tắc + validator (allowlist, schema) — hàm thuần
+│   │   ├── eda_tools.py       # 5 EDA tool xác định: overview, data_quality, numeric_summary, categorical_summary, correlation
+│   │   ├── eda_text.py        # câu trả lời text cho EDA (template, số liệu lấy từ payload)
 │   │   ├── intent.py          # nhận diện yêu cầu vẽ biểu đồ / xem SQL trong câu hỏi (hàm thuần)
 │   │   ├── answer_tools.py    # template_answer + answer_is_grounded (kiểm tra số liệu)
 │   │   ├── mocks.py           # mock_sql, mock_viz_code
 │   │   └── text_utils.py      # clean_code, is_valid_code, extract_sql (hàm thuần)
-│   ├── agents/                # sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
+│   ├── agents/                # planner_agent.py (kế hoạch), sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
 │   └── pipeline/
-│       └── orchestrator.py    # PipelineOrchestrator (SQL → thực thi → câu trả lời → biểu đồ tùy chọn) + DatasetService (cầu nối api → tools)
+│       └── orchestrator.py    # PipelineOrchestrator (kế hoạch → query và/hoặc EDA → câu trả lời → biểu đồ tùy chọn) + DatasetService (cầu nối api → tools)
 ├── frontend/
 │   ├── app.py                 # Entrypoint Streamlit
 │   ├── api_client.py          # NL2VizClient: mọi lời gọi tới backend
@@ -97,9 +101,11 @@ Data-Analytics-System/
 
 ## 3. Luồng một request
 
-`POST /api/query` → `PipelineOrchestrator.run()` (một luồng duy nhất, không có "chế độ"):
+`POST /api/query` → `PipelineOrchestrator.run()` (một luồng duy nhất, không có "chế độ"). Bước 0 là **kế hoạch xử lý** (giai đoạn 4, xem mục 6c); phần dưới là bước `query`:
 
 ```
+0. PlannerAgent.plan(question, dataset_id)  → ProcessingPlan: danh sách bước {query | EDA operation} đã xác thực
+                                            (không có từ khóa EDA → [query], không gọi LLM planner)
 1. SQLAgent.generate(question, dataset_id)  prompt theo schema → LLM → SQL; `-- CLARIFY:` → "needs_clarification" (dừng)
                                             lỗi gọi LLM → "sql_error" (không đem câu chú thích đi chạy)
 2. tool execute_sql(sql, dataset_id)        chỉ-đọc, timeout, giới hạn dòng; lỗi → "sql_error"; 0 dòng → "empty_result"
@@ -144,12 +150,15 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 `/api/query` trả HTTP 200 với hợp đồng tách rõ từng phần:
 
 ```
-status    ok | sql_error | empty_result | needs_clarification      (chỉ phần truy vấn/trả lời)
+status    ok | sql_error | empty_result | needs_clarification | eda_error   (phần truy vấn/trả lời; eda_error: kế hoạch chỉ có EDA và mọi operation lỗi)
 answer    {text, source, fallback_reason}  câu trả lời text (có cả khi kết quả rỗng; null khi lỗi SQL/cần làm rõ)
 clarification   câu hỏi làm rõ (khi needs_clarification)
 table     {columns, rows}                  bảng kết quả (bằng chứng)
 evidence  {sql, sql_source, sql_prompt, sql_error, show_sql, row_count, column_count, truncated, elapsed_ms}
 chart     {status: not_requested|ok|error, requested_by: none|option|prompt, chart_type, png_base64, error, code, prompt, source}
+plan      {source: rules|llm|rules_fallback, steps: [{operation, table, columns, params}], chart_requested, show_sql}
+eda       [{operation, table, columns, status: ok|not_applicable|error, error, summary, table_data{columns,rows}, warnings,
+            definitions, exact, sampled, sample_info, truncated, queries, elapsed_ms, text}]
 ```
 
 SQL/code/prompt nội bộ nằm trong `evidence`/`chart`, không thay thế `answer`. Lỗi biểu đồ **không** đổi `status`. **`dataset_id` không tồn tại/không hợp lệ → 404, không bao giờ fallback sang demo DB.** Lỗi dataset có dạng `{"detail": {"code", "message"}}`: `unsupported_format` 415, `file_too_large` 413, `invalid_file`/`unsafe_content`/`import_failed`/`invalid_relation` 422, `dataset_not_found`/`relation_not_found` 404. Tài liệu tương tác: `http://127.0.0.1:8000/docs`.
@@ -215,11 +224,13 @@ Mở `http://localhost:8501`. Không có key và không có Ollama thì app vẫ
 
 ### Dùng chức năng upload
 
-1. Mở sidebar → **📁 Upload dữ liệu** (ngay dưới ô chọn dataset) → chọn tệp → **Import dữ liệu**. Kết quả import (dataset_id, bảng, số dòng, cảnh báo) hiện ngay; dataset vừa upload tự được chọn.
-2. Chọn dataset ở sidebar (demo hoặc các tệp đã upload trong phiên), xem schema, rồi hỏi ở ô chat (hoặc bấm một bong bóng gợi ý phía trên ô nhập; bong bóng **📋 Thống kê thông tin/schema dataset** hiện bảng/cột/số dòng/quan hệ của dataset đang chọn mà không gọi LLM; khung chat tự cuộn tới tin nhắn mới nhất). Phản hồi gồm câu trả lời + bảng; SQL nằm trong **🔎 Bằng chứng / SQL** (đóng sẵn, tự mở khi bạn hỏi “cho xem SQL”). Muốn biểu đồ, nêu loại ngay trong câu hỏi: “vẽ biểu đồ cột / đường / tròn / phân tán …”. Hướng dẫn cài Ollama nằm trong sidebar, mục vẽ biểu đồ.
+1. Mở sidebar → **📁 Upload dữ liệu** (ngay dưới ô chọn dataset) → chọn tệp → **Import dữ liệu**. Sau import chỉ hiện **một** thông báo ngắn (dataset vừa upload tự được chọn); các lưu ý import được gộp (một dòng cho mỗi bảng) trong mục **⚠️ Lưu ý khi import** ở sidebar, chi tiết từng cột nằm ở cột `import_notes` của “Tổng quan dataset”.
+2. Chọn dataset ở sidebar (demo hoặc các tệp đã upload trong phiên), xem schema, rồi hỏi ở ô chat (hoặc bấm một bong bóng gợi ý phía trên ô nhập; bong bóng **Tổng quan dataset** chỉ là một câu hỏi bình thường: planner định tuyến sang `table_overview` cho các bảng của dataset (số dòng/cột, kiểu, NULL, số giá trị phân biệt, ghi chú import), không có luồng riêng; khung chat tự cuộn tới tin nhắn mới nhất). Phản hồi gồm câu trả lời + bảng; SQL nằm trong **🔎 Bằng chứng / SQL** (đóng sẵn, tự mở khi bạn hỏi “cho xem SQL”). Muốn biểu đồ, nêu loại ngay trong câu hỏi: “vẽ biểu đồ cột / đường / tròn / phân tán …”. Hướng dẫn cài Ollama nằm trong sidebar, mục vẽ biểu đồ.
 3. Bảng không có khóa ngoại sẽ **không** bị tự JOIN. Nếu câu hỏi cần JOIN, hệ thống hỏi lại; bạn khai báo quan hệ ở **🔗 Quan hệ giữa các bảng** (sidebar) rồi hỏi lại.
 
-Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mất khi tải lại trang (dữ liệu vẫn nằm trong `data/datasets/`; xem/xóa/hết hạn dataset là giai đoạn 4).
+Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mất khi tải lại trang (dữ liệu vẫn nằm trong `data/datasets/`; xem/xóa/hết hạn dataset là giai đoạn 6).
+
+Ví dụ câu hỏi EDA: “Tổng quan dữ liệu”, “Kiểm tra giá trị thiếu và trùng lặp của bảng orders”, “Thống kê mô tả cột revenue của orders”, “Top giá trị phổ biến của cột region”, “Tương quan giữa các cột số của orders”, và câu kết hợp “Doanh thu theo vùng và kiểm tra giá trị thiếu của orders”.
 
 ---
 
@@ -227,12 +238,44 @@ Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mấ
 
 - **Định dạng:** CSV (một bảng), Excel `.xlsx` (mỗi sheet một bảng trong cùng database), SQLite `.db/.sqlite`. `.sql` (script), `.json`, `.xls` bị từ chối kèm giải thích. Mỗi upload = một SQLite riêng (`data/datasets/<dataset_id>/data.db`); client chỉ biết `dataset_id` (uuid hex, kiểm tra định dạng), tên tệp/MIME của client không bao giờ thành đường dẫn. Tệp gốc bị xóa sau import; import lỗi thì xóa sạch thư mục.
 - **Chuẩn hóa tên:** giữ chữ Unicode (tiếng Việt có dấu), ký tự khác → `_`; rỗng → `column_N`/`sheet_N`; bắt đầu bằng số → tiền tố `c_`/`t_`; trùng (không phân biệt hoa/thường) → `_2`, `_3`; tối đa 64 ký tự. SQLite upload giữ nguyên tên bảng/cột.
-- **Kiểu dữ liệu:** cột thuần số nguyên → INTEGER, có số thực → REAL, còn lại TEXT; ngày giờ → TEXT ISO; số 0 đứng đầu (`007`) giữ TEXT; số nguyên vượt int64 → TEXT; ô rỗng, `#N/A`… → NULL.
+- **Kiểu dữ liệu:** cột thuần số nguyên → INTEGER, có số thực → REAL, còn lại TEXT; ngày giờ → TEXT ISO; số 0 đứng đầu (`007`) giữ TEXT; số nguyên vượt int64 → TEXT; ô rỗng, lỗi công thức Excel (`#N/A`…) → NULL; cột số có lẫn `NA`/`N/A`/`null`/`nan` → các token đó thành NULL (chỉ khi phần còn lại đều là số); cột lẫn số và chữ → TEXT + ghi chú cột (cảnh báo import được gộp một dòng mỗi bảng); cột ngày ISO nhận diện nhưng vẫn lưu TEXT, ngày `d/m/y` mơ hồ giữ nguyên TEXT.
+- **Metadata kiểu theo cột** (trong `meta.json` và `GET /api/datasets/{id}`): `type` (SQLite), `source_type` (CSV: `text`; Excel: kiểu ô quan sát; SQLite: kiểu khai báo), `inferred_type` (`integer|real|text|date|datetime|boolean|mixed|empty|blob|numeric`) và `notes` (ô trống→NULL, NA→NULL, số 0 đứng đầu, kiểu hỗn hợp...). EDA dùng chúng để không hiểu nhầm dữ liệu đã chuẩn hóa.
 - **Excel:** bỏ sheet ẩn/trống/chỉ có tiêu đề (có cảnh báo); bỏ dòng ghi chú phía trên tiêu đề; công thức đọc theo giá trị cache lần lưu cuối.
 - **SQLite:** mở chỉ đọc rồi *tạo lại* bảng trong DB mới (giữ khóa ngoại/ràng buộc); bỏ view, trigger, bảng ảo, index; authorizer chặn ATTACH/PRAGMA/hàm nguy hiểm.
 - **Giới hạn mặc định:** 50 MB/tệp (kiểm tra cả Content-Length trước khi nhận), 300 MB sau giải nén `.xlsx`, 500 MB SQLite tạo ra, 200.000 dòng/bảng, 500 cột, 50 sheet, 60 giây import.
 - **Truy vấn:** kết nối `mode=ro` + authorizer (chỉ SELECT; INSERT/UPDATE/DELETE/DDL/PRAGMA/ATTACH và nhiều statement bị từ chối), timeout 10 giây, tối đa 1000 dòng / 2 MB kết quả (cắt thì `truncated=true`). Áp dụng cho cả demo DB.
-- **Hạn chế đã biết:** CSV dấu thập phân kiểu Việt (`12,5`) giữ TEXT; CSV luôn coi dòng đầu là tiêu đề; Excel ô gộp không được trải; việc "không JOIN khi chưa có quan hệ" dựa vào prompt (chưa có bộ kiểm tra SQL sau sinh); chưa có liệt kê/xóa/hết hạn dataset và cô lập theo phiên (giai đoạn 4).
+- **Hạn chế đã biết:** CSV dấu thập phân kiểu Việt (`12,5`) giữ TEXT; CSV luôn coi dòng đầu là tiêu đề; Excel ô gộp không được trải; việc "không JOIN khi chưa có quan hệ" dựa vào prompt (chưa có bộ kiểm tra SQL sau sinh); chưa có liệt kê/xóa/hết hạn dataset và cô lập theo phiên (giai đoạn 6).
+
+---
+
+## 6c. EDA (giai đoạn 4)
+
+SQLite vẫn là định dạng lưu trữ chuẩn. EDA **không** phải chatbot riêng: nó là các bước trong cùng một lượt chat, do planner quyết định.
+
+**Kế hoạch xử lý** (`tools/planner.py`, `agents/planner_agent.py`): `ProcessingPlan` = danh sách bước `{operation, table, columns, params}` + yêu cầu biểu đồ + yêu cầu hiển thị SQL.
+
+| Tình huống | Cách định tuyến |
+| --- | --- |
+| Không có từ khóa EDA (“doanh thu theo vùng”, “top 5 sản phẩm”) | `[query]` bằng quy tắc; **không** gọi LLM planner, **không** chạy EDA |
+| Từ khóa EDA rõ ràng, không có phần truy vấn (“tổng quan”, “giá trị thiếu”, “trùng lặp”, “thống kê mô tả”, “phân phối”, “top giá trị”, “tương quan”; có cả tiếng Anh và không dấu) | các bước EDA bằng quy tắc (bảng/cột nhận từ tên được nhắc tới) |
+| Kết hợp (“doanh thu theo vùng **và** kiểm tra giá trị thiếu”) | LLM trả kế hoạch JSON; không có LLM/mock → bản nháp của quy tắc; LLM không gọi được → `rules_fallback` |
+| Kế hoạch sai/mơ hồ (operation ngoài allowlist, bảng/cột không tồn tại, tham số lỗi, nhiều bảng mà không rõ bảng nào) | `validate_plan` từ chối → `needs_clarification` với câu hỏi làm rõ; không chạy gì |
+
+`validate_plan` áp cho mọi kế hoạch (quy tắc lẫn LLM): operation ∈ allowlist, tên bảng/cột phải có trong schema (chuẩn hóa hoa/thường), `top_k` ∈ [1, 50], `method` ∈ {pearson, spearman}, tối đa một bước `query`, tối đa 6 bước; tham số lạ bị loại. Tổng quan/chất lượng không nêu bảng thì áp dụng cho các bảng của dataset (tối đa `EDA_MAX_TABLES`); các operation khác cần bảng rõ ràng.
+
+**EDA tools** (xác định, chỉ đọc, đăng ký trong `container.py`; LLM không sinh hay chạy code phân tích):
+
+| Tool | Nội dung | Cách tính |
+| --- | --- | --- |
+| `eda_table_overview` | số dòng/cột; kiểu khai báo, kiểu quan sát (`typeof`), kiểu/ghi chú lúc import; NULL; số giá trị phân biệt | SQL (chính xác) |
+| `eda_data_quality` | NULL theo cột (số và %), ô chuỗi rỗng (đếm riêng), dòng trùng lặp | SQL. **Trùng lặp = số dòng thừa so với bản đầu của dòng giống hệt trên mọi cột** (hoặc trên các cột chỉ định); NULL coi là bằng nhau |
+| `eda_numeric_summary` | count, missing, non_numeric, mean, std, min, q1, median, q3, max | count/mean/min/max/std bằng SQL (std mẫu, 2 lượt); quartile bằng pandas (nội suy tuyến tính). Chỉ giá trị số (`typeof` integer/real) được tính, giá trị chữ lẫn trong cột bị bỏ qua + cảnh báo |
+| `eda_categorical_summary` | số nhóm, top-k giá trị (số lần, %) | SQL `GROUP BY` |
+| `eda_correlation` | ma trận Pearson/Spearman + cặp mạnh nhất | pandas; **pairwise deletion** (bỏ NULL/giá trị không phải số theo từng cặp, cần ≥ 3 cặp); cột hằng số bị loại |
+
+**Giới hạn** (`.env`): `EDA_MAX_COLUMNS` 50, `EDA_TOP_K` 10, `EDA_SAMPLE_ROWS` 50000 (dữ liệu đưa sang pandas; vượt thì lấy mẫu có hệ thống mỗi k dòng), `EDA_TIMEOUT` 20 s mỗi operation (cộng timeout 10 s mỗi câu SQL), `EDA_CORR_MAX_COLUMNS` 15, `EDA_MAX_TABLES` 10. Payload ghi rõ: `exact` (False nếu lấy mẫu / cắt cột / hết thời gian), `sampled` + `sample_info`, `truncated`, `warnings`, `definitions` (cách tính) và `queries` (SQL đã chạy, hiển thị trong “Bằng chứng / SQL”). Câu trả lời text của EDA là template xác định dựng từ payload nên không có số nào ngoài kết quả.
+
+**Chưa làm (giai đoạn sau):** biểu đồ từ kết quả EDA (giai đoạn 5; yêu cầu vẽ trong lượt chỉ-EDA trả `chart.status="error"` kèm lời giải thích, các kết quả khác vẫn giữ nguyên); phát hiện ngoại lai; quản lý dataset (giai đoạn 6).
 
 ---
 

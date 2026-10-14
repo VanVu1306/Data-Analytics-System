@@ -187,9 +187,30 @@ class SQLiteRepository:
         df, _ = self.execute(f"SELECT * FROM {quote_ident(table)} LIMIT {int(n)}")
         return "" if df is None else df.to_string(index=False)
 
+    def get_table_columns(self) -> Dict[str, List[Dict[str, object]]]:
+        """{table: [{name, type, pk}]} theo kiểu khai báo trong SQLite (dùng cho planner/EDA)."""
+        with closing(self._connect_read_only()) as conn:
+            cur = conn.cursor()
+            out: Dict[str, List[Dict[str, object]]] = {}
+            for t in self._table_names(cur):
+                cur.execute(f"PRAGMA table_info({quote_ident(t)})")
+                out[t] = [{"name": c[1], "type": c[2] or "", "pk": bool(c[5])} for c in cur.fetchall()]
+        return out
+
     # ── Execute ────────────────────────────────────────────────────────────
     def execute(self, sql: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         """Chạy SQL chỉ-đọc. Thành công: (df, None). Lỗi: (None, error_str)."""
+        return self.fetch(sql, max_rows=self.max_rows, max_bytes=self.max_result_bytes)
+
+    def fetch(
+        self, sql: str, *, max_rows: Optional[int] = None, max_bytes: Optional[int] = None
+    ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        """Như `execute` nhưng giới hạn do người gọi chọn (EDA cần nhiều dòng hơn truy vấn của người dùng).
+
+        Vẫn qua kết nối chỉ-đọc + authorizer + giới hạn thời gian từng câu lệnh.
+        """
+        max_rows = self.max_rows if max_rows is None else max_rows
+        max_bytes = (32 * 1024 * 1024) if max_bytes is None else max_bytes
         try:
             with closing(self._connect_read_only(restricted=True)) as conn:
                 cur = conn.execute(sql)
@@ -203,13 +224,13 @@ class SQLiteRepository:
                     if not batch:
                         break
                     for row in batch:
-                        if len(rows) >= self.max_rows:
+                        if len(rows) >= max_rows:
                             truncated = True
                             break
                         row = tuple(_cell(v) for v in row)
                         rows.append(row)
                         total_bytes += sum(_cell_size(v) for v in row)
-                        if total_bytes > self.max_result_bytes:
+                        if total_bytes > max_bytes:
                             truncated = True
                             break
 

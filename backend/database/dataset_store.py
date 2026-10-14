@@ -165,6 +165,15 @@ class DatasetStore:
         relations = [tuple(r[k] for k in _REL_KEYS) for r in info.confirmed_relations]
         return SQLiteRepository(self.db_path(dataset_id), relations=relations, **self._query_kwargs)
 
+    def column_meta(self, dataset_id: str | None, table: str) -> dict[str, dict]:
+        """Metadata import của từng cột ({} cho demo DB hoặc dataset cũ chưa có metadata)."""
+        if dataset_id is None:
+            return {}
+        for t in self.get(dataset_id).tables:
+            if t.get("name") == table:
+                return {c["name"]: c for c in t.get("columns", [])}
+        return {}
+
     # ---------------------- quan hệ khai báo thủ công ------------------- #
     def add_relation(self, dataset_id: str, from_table: str, from_column: str, to_table: str, to_column: str) -> DatasetInfo:
         rel = dict(zip(_REL_KEYS, (from_table, from_column, to_table, to_column)))

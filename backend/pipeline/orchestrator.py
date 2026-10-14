@@ -28,8 +28,11 @@ from typing import Optional
 
 import pandas as pd
 
-from backend.agents import AnswerAgent, SQLAgent, VizAgent
-from backend.tools import ToolRegistry, detect_sql_request, resolve_chart_plan
+from dataclasses import field
+
+from backend.agents import AnswerAgent, PlannerAgent, SQLAgent, VizAgent
+from backend.tools import EdaPayload, ToolRegistry, detect_sql_request, resolve_chart_plan
+from backend.tools.planner import OP_QUERY, PlanStep, ProcessingPlan
 
 
 class PipelineStatus(str, Enum):
@@ -37,6 +40,7 @@ class PipelineStatus(str, Enum):
     SQL_ERROR = "sql_error"          # SQL không sinh được / chạy lỗi / bị từ chối
     EMPTY_RESULT = "empty_result"    # SQL chạy được nhưng không có dòng nào
     NEEDS_CLARIFICATION = "needs_clarification"  # câu hỏi cần làm rõ / cần quan hệ giữa bảng
+    EDA_ERROR = "eda_error"          # kế hoạch chỉ có EDA và mọi operation đều lỗi/không áp dụng được
 
 
 class ChartStatus(str, Enum):
@@ -85,23 +89,98 @@ class PipelineResult:
     viz_source: Optional[str] = None
     chart_error: Optional[str] = None
     chart_png: Optional[bytes] = None
+    # Giai đoạn 4 — kế hoạch xử lý và kết quả EDA
+    plan: Optional[ProcessingPlan] = None
+    eda: list = field(default_factory=list)   # list[EdaPayload], theo thứ tự trong kế hoạch
 
 
 class PipelineOrchestrator:
-    def __init__(self, sql_agent: SQLAgent, viz_agent: VizAgent, tools: ToolRegistry, answer_agent: AnswerAgent):
+    def __init__(
+        self,
+        sql_agent: SQLAgent,
+        viz_agent: VizAgent,
+        tools: ToolRegistry,
+        answer_agent: AnswerAgent,
+        planner_agent: Optional[PlannerAgent] = None,
+    ):
         self._sql_agent = sql_agent
         self._viz_agent = viz_agent
         self._answer_agent = answer_agent
+        self._planner = planner_agent
         self._tools = tools
 
     def run(self, request: PipelineRequest) -> PipelineResult:
+        """Kế hoạch (query / EDA / kết hợp) -> chạy từng bước -> hợp nhất phản hồi."""
+        plan = self._plan(request)
+        if isinstance(plan, str):  # câu hỏi làm rõ từ planner
+            return PipelineResult(
+                status=PipelineStatus.NEEDS_CLARIFICATION, question=request.question, sql="", sql_prompt="",
+                sql_source="planner", clarification=plan,
+            )
+        query_step = next((s for s in plan.steps if s.op == OP_QUERY), None)
+        if query_step is not None:
+            result = self._run_query(request, plan, query_step)
+        else:
+            result = PipelineResult(
+                status=PipelineStatus.OK, question=request.question, sql="", sql_prompt="", sql_source="none",
+                show_sql=plan.show_sql,
+            )
+        result.plan = plan
+        if plan.eda_steps:
+            self._run_eda(result, request, plan)
+        if query_step is None and plan.chart.requested:  # biểu đồ từ kết quả EDA: giai đoạn 5
+            result.chart_origin, result.chart_type = plan.chart.origin, plan.chart.chart_type
+            result.chart_status = ChartStatus.ERROR
+            result.chart_error = (
+                "Biểu đồ cho kết quả EDA chưa được hỗ trợ (dự kiến giai đoạn 5); "
+                "hiện chỉ vẽ được biểu đồ cho kết quả truy vấn."
+            )
+        return result
+
+    # ── Kế hoạch ───────────────────────────────────────────────────────────
+    def _plan(self, request: PipelineRequest):
+        if self._planner is None:  # không có planner: luồng truy vấn như trước
+            return ProcessingPlan(
+                [PlanStep(OP_QUERY)], resolve_chart_plan(request.question, request.chart_hint),
+                request.show_sql or detect_sql_request(request.question),
+            )
+        outcome = self._planner.plan(
+            request.question,
+            dataset_id=request.dataset_id,
+            chart_hint=request.chart_hint,
+            show_sql=request.show_sql,
+            use_llm=not request.use_mock_sql,
+        )
+        return outcome.clarification if outcome.clarification else outcome.plan
+
+    # ── Bước EDA ───────────────────────────────────────────────────────────
+    def _run_eda(self, result: PipelineResult, request: PipelineRequest, plan: ProcessingPlan) -> None:
+        for step in plan.eda_steps:
+            payload: EdaPayload = self._tools.get(f"eda_{step.op}").run(
+                table=step.table, columns=list(step.columns) or None, dataset_id=request.dataset_id, **step.params
+            )  # dataset không tồn tại -> DatasetNotFoundError, không fallback
+            payload.text = self._tools.get("eda_answer").run(payload=payload, question=result.question)
+            result.eda.append(payload)
+        texts = [p.text for p in result.eda if p.text]
+        if texts:
+            joined = "\n\n".join(texts)
+            result.answer = f"{result.answer}\n\n{joined}" if result.answer else joined
+            result.answer_source = result.answer_source or "template"
+        if plan.has_query:
+            return  # trạng thái do phần truy vấn quyết định
+        if not any(p.status == "ok" for p in result.eda):
+            result.status = PipelineStatus.EDA_ERROR
+
+    # ── Bước truy vấn ──────────────────────────────────────────────────────
+    def _run_query(self, request: PipelineRequest, plan: ProcessingPlan, step: PlanStep) -> PipelineResult:
         question = request.question
-        chart_plan = resolve_chart_plan(question, request.chart_hint)
-        show_sql = request.show_sql or detect_sql_request(question)
+        sql_question = step.question or question  # câu hỏi con (phần truy vấn) nếu planner tách được
+        chart_plan = plan.chart
+        show_sql = plan.show_sql
 
         # ── Stage 1: câu hỏi -> SQL (dùng câu hỏi gốc, không kèm gợi ý chart) ──
         sql_gen = self._sql_agent.generate(
-            question, use_mock=request.use_mock_sql, dataset_id=request.dataset_id
+            sql_question, use_mock=request.use_mock_sql, dataset_id=request.dataset_id
         )
         result = PipelineResult(
             status=PipelineStatus.OK,

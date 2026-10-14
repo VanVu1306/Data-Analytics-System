@@ -28,6 +28,17 @@ class GetSchemaTool(Tool):
         return self._store.repository(dataset_id).get_schema()
 
 
+class DescribeSchemaTool(Tool):
+    name = "describe_schema"
+    description = "Trả về {bảng: [{name, type, pk}]} theo kiểu khai báo trong SQLite (planner/EDA dùng để xác thực)."
+
+    def __init__(self, store: DatasetStore):
+        self._store = store
+
+    def run(self, dataset_id: Optional[str] = None) -> Dict[str, List[Dict[str, object]]]:
+        return self._store.repository(dataset_id).get_table_columns()
+
+
 class ListTablesTool(Tool):
     name = "list_tables"
     description = "Trả về {tên_bảng: [cột...]} của dataset."

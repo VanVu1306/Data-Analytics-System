@@ -17,9 +17,12 @@ from backend.api.schemas import (
     AnswerInfo,
     ChartResult,
     DatasetResponse,
+    EdaResultInfo,
     Evidence,
     HealthResponse,
     ModelsResponse,
+    PlanInfo,
+    PlanStepInfo,
     QueryRequest,
     QueryResponse,
     RelationRequest,
@@ -60,11 +63,34 @@ def _require_default_db(container: Container) -> None:
         raise HTTPException(status_code=503, detail=DB_MISSING_HINT)
 
 
+def _table_data(df) -> TableData:
+    split = json.loads(df.to_json(orient="split", date_format="iso"))
+    return TableData(columns=[str(c) for c in split["columns"]], rows=split["data"])
+
+
+def _eda_info(p) -> EdaResultInfo:
+    return EdaResultInfo(
+        operation=p.operation,
+        table=p.table,
+        columns=p.columns,
+        status=p.status,
+        error=p.error,
+        summary=json.loads(json.dumps(p.summary, default=str)),
+        table_data=_table_data(p.data) if p.data is not None else None,
+        warnings=p.warnings,
+        definitions=p.definitions,
+        exact=p.exact,
+        sampled=p.sampled,
+        sample_info=p.sample_info,
+        truncated=p.truncated,
+        queries=p.queries,
+        elapsed_ms=p.elapsed_ms,
+        text=p.text,
+    )
+
+
 def _to_response(result: PipelineResult) -> QueryResponse:
-    table = None
-    if result.df is not None:
-        split = json.loads(result.df.to_json(orient="split", date_format="iso"))
-        table = TableData(columns=[str(c) for c in split["columns"]], rows=split["data"])
+    table = _table_data(result.df) if result.df is not None else None
 
     answer = (
         AnswerInfo(text=result.answer, source=result.answer_source or "template", fallback_reason=result.answer_fallback_reason)
@@ -92,6 +118,14 @@ def _to_response(result: PipelineResult) -> QueryResponse:
         prompt=result.viz_prompt,
         source=result.viz_source,
     )
+    plan = None
+    if result.plan is not None:
+        plan = PlanInfo(
+            source=result.plan.source,
+            steps=[PlanStepInfo(**s.to_dict()) for s in result.plan.steps],
+            chart_requested=result.plan.chart.requested,
+            show_sql=result.plan.show_sql,
+        )
     return QueryResponse(
         status=result.status.value,
         question=result.question,
@@ -100,6 +134,8 @@ def _to_response(result: PipelineResult) -> QueryResponse:
         table=table,
         evidence=evidence,
         chart=chart,
+        plan=plan,
+        eda=[_eda_info(p) for p in result.eda],
     )
 
 

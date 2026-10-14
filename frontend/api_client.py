@@ -6,7 +6,7 @@ Client HTTP gọi backend NL2Viz. Mọi giao tiếp với backend đi qua file n
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -72,14 +72,56 @@ class Chart:
 
 
 @dataclass
+class PlanStep:
+    operation: str                        # query | table_overview | data_quality | numeric_summary | ...
+    table: Optional[str] = None
+    columns: List[str] = field(default_factory=list)
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Plan:
+    """Kế hoạch xử lý mà hệ thống đã thực hiện."""
+
+    source: str                           # rules | llm | rules_fallback
+    steps: List[PlanStep] = field(default_factory=list)
+    chart_requested: bool = False
+    show_sql: bool = False
+
+
+@dataclass
+class EdaResult:
+    """Kết quả một operation EDA: bảng + số liệu có cấu trúc + cảnh báo + thông tin lấy mẫu."""
+
+    operation: str
+    table: str
+    columns: List[str] = field(default_factory=list)
+    status: str = "ok"                    # ok | not_applicable | error
+    error: Optional[str] = None
+    summary: Dict[str, Any] = field(default_factory=dict)
+    df: Optional[pd.DataFrame] = None
+    warnings: List[str] = field(default_factory=list)
+    definitions: List[str] = field(default_factory=list)
+    exact: bool = True
+    sampled: bool = False
+    sample_info: Optional[Dict[str, Any]] = None
+    truncated: bool = False
+    queries: List[str] = field(default_factory=list)
+    elapsed_ms: int = 0
+    text: Optional[str] = None
+
+
+@dataclass
 class QueryResult:
-    status: str                           # ok | sql_error | empty_result | needs_clarification
+    status: str                           # ok | sql_error | empty_result | needs_clarification | eda_error
     question: str
     evidence: Evidence
     chart: Chart
     answer: Optional[Answer] = None
     clarification: Optional[str] = None
     df: Optional[pd.DataFrame] = None
+    plan: Optional[Plan] = None
+    eda: List[EdaResult] = field(default_factory=list)
 
 
 class NL2VizClient:
@@ -173,7 +215,29 @@ class NL2VizClient:
             df = pd.DataFrame(d["table"]["rows"], columns=d["table"]["columns"])
 
         ev, ch = d["evidence"], d["chart"]
+        plan = None
+        if d.get("plan"):
+            pl = d["plan"]
+            plan = Plan(
+                source=pl["source"],
+                steps=[PlanStep(**st) for st in pl["steps"]],
+                chart_requested=pl.get("chart_requested", False),
+                show_sql=pl.get("show_sql", False),
+            )
+        eda = []
+        for e in d.get("eda", []):
+            td = e.get("table_data")
+            eda.append(EdaResult(
+                operation=e["operation"], table=e["table"], columns=e.get("columns", []), status=e["status"],
+                error=e.get("error"), summary=e.get("summary", {}),
+                df=pd.DataFrame(td["rows"], columns=td["columns"]) if td else None,
+                warnings=e.get("warnings", []), definitions=e.get("definitions", []), exact=e.get("exact", True),
+                sampled=e.get("sampled", False), sample_info=e.get("sample_info"), truncated=e.get("truncated", False),
+                queries=e.get("queries", []), elapsed_ms=e.get("elapsed_ms", 0), text=e.get("text"),
+            ))
         return QueryResult(
+            plan=plan,
+            eda=eda,
             status=d["status"],
             question=d["question"],
             answer=Answer(**d["answer"]) if d.get("answer") else None,
