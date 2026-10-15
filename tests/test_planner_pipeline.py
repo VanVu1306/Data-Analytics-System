@@ -40,7 +40,7 @@ def ask(client, ds, question="Điểm trung bình theo lớp", **kw):
 
 
 def sql_calls(llm):
-    return [c for c in llm.calls if "planner" not in (c["system"] or "")]
+    return [c for c in llm.calls if "SQL assistant" in (c["system"] or "") or "SQLite assistant" in (c["system"] or "")]
 
 
 def test_plain_query_plan(env):
@@ -74,6 +74,7 @@ def test_eda_only_plan_runs_no_sql_agent(env):
     d = ask(client, ds, "Cho mình xem phân bố điểm")
     assert d["status"] == "ok" and d["table"] is None and d["eda"][0]["operation"] == "numeric_summary"
     assert sql_calls(llm) == []  # EDA do tool xác định tính, không qua SQL Agent
+    assert len(llm.calls) == 1 and "EDA RESULT" in llm.calls[0]["prompt"]  # chỉ còn lời gọi Answer Agent (giai đoạn 7)
 
 
 def test_invalid_plan_asks_user_and_executes_nothing(env):

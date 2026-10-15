@@ -2,7 +2,7 @@
 backend/container.py
 --------------------
 Composition root: nơi DUY NHẤT khởi tạo và nối các thành phần
-(settings -> repo -> llm clients -> tools -> agents (sql, viz, answer) -> orchestrator).
+(settings -> repo -> llm clients -> tools -> agents (planner, sql, viz, answer) -> orchestrator).
 """
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from backend.tools import (
     BuildChartSpecTool,
     RenderChartSpecTool,
     EDA_TOOL_CLASSES,
+    AnswerTemplateTool,
     DescribeSchemaTool,
-    EdaAnswerTool,
     ExecuteSQLTool,
     GetDatasetTool,
     GetSchemaTool,
@@ -30,7 +30,6 @@ from backend.tools import (
     MockSQLTool,
     MockVizCodeTool,
     RenderChartTool,
-    TemplateAnswerTool,
     ToolRegistry,
     UnlinkTablesTool,
 )
@@ -95,8 +94,7 @@ def build_container(
     tools.register(RenderChartTool(dpi=settings.chart_dpi))  # chế độ VIZ_MODE=code (cũ)
     tools.register(BuildChartSpecTool(datasets, settings))
     tools.register(RenderChartSpecTool(dpi=settings.chart_dpi))
-    tools.register(TemplateAnswerTool())
-    tools.register(EdaAnswerTool())
+    tools.register(AnswerTemplateTool())  # template fallback cho Answer Agent (query / EDA / query + EDA)
     for eda_cls in EDA_TOOL_CLASSES:
         tools.register(eda_cls(datasets, settings))
 

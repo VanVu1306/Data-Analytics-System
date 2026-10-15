@@ -3,13 +3,18 @@ backend/pipeline/orchestrator.py
 --------------------------------
 Orchestrator điều phối một luồng hỏi đáp duy nhất, quyết định thứ tự và điều kiện dừng:
 
-    Stage 1  SQLAgent.generate        câu hỏi  -> SQL (hoặc yêu cầu làm rõ)
-    Stage 2  tool `execute_sql`       SQL      -> DataFrame (chỉ đọc, có giới hạn)
-    Stage 3  AnswerAgent.generate     df       -> câu trả lời text ngắn, bám số liệu   (luôn chạy khi có kết quả)
+    Stage 0  PlannerAgent.plan        câu hỏi  -> kế hoạch {steps: query ≤ 1 + EDA, chart, show_sql} đã xác thực
+    Stage 1  SQLAgent.generate        (bước query) câu hỏi -> SQL (hoặc yêu cầu làm rõ)
+    Stage 2  tool `execute_sql`       (bước query) SQL -> DataFrame (chỉ đọc, có giới hạn)
+    Stage 2b tool `eda_*`             (các bước EDA) -> EdaPayload theo thứ tự kế hoạch
+    Stage 3  AnswerAgent.generate     TẤT CẢ bằng chứng đã thu thập (query và/hoặc EDA) -> MỘT câu trả lời text ngắn, bám số liệu
     Stage 4  (tùy chọn) biểu đồ       chỉ khi người dùng yêu cầu (trong câu hỏi hoặc qua tùy chọn `chart_hint`)
-             VizAgent.generate_code   df + câu hỏi -> code matplotlib
+             VizAgent.generate_code   df + câu hỏi -> code matplotlib (VIZ_MODE=code)
              tool `render_chart`      code -> PNG
+             tool `build_chart_spec` + `render_chart_spec`  (VIZ_MODE=spec, mặc định)
 
+Câu trả lời chỉ được tổng hợp SAU KHI mọi bước của kế hoạch đã chạy xong, và chỉ từ nhánh thực sự trả về bằng chứng
+(hoặc báo lỗi rõ ràng); bảng query, SQL/bằng chứng, bảng EDA và biểu đồ là các phần riêng của kết quả.
 Biểu đồ là bước phụ: lỗi ở Stage 4 chỉ ghi vào `chart_status/chart_error`, không làm mất câu trả lời và bảng.
 Mọi stage chạy trên dataset do `dataset_id` chọn (None = demo DB); id không tồn tại -> DatasetNotFoundError,
 không fallback sang database khác.
@@ -31,7 +36,17 @@ import pandas as pd
 from dataclasses import field
 
 from backend.agents import AnswerAgent, PlannerAgent, SQLAgent, VizAgent
-from backend.tools import ChartError, EdaPayload, ToolRegistry, detect_sql_request, is_vi_question, resolve_chart_plan
+from backend.tools import (
+    AnswerEvidence,
+    ChartError,
+    EdaPayload,
+    QueryEvidence,
+    ToolRegistry,
+    detect_sql_request,
+    is_vietnamese,
+    resolve_chart_plan,
+)
+from backend.tools.answer_evidence import QUERY_CLARIFICATION, QUERY_EMPTY, QUERY_ERROR, QUERY_OK
 from backend.tools.planner import OP_QUERY, PlanStep, ProcessingPlan
 
 
@@ -131,6 +146,7 @@ class PipelineOrchestrator:
         result.plan = plan
         if plan.eda_steps:
             self._run_eda(result, request, plan)
+        self._answer(result, request, plan)  # sau khi mọi bước của kế hoạch đã chạy xong
         if self._viz_mode == "spec":
             if plan.chart.requested:
                 self._chart_spec(result, request, plan)
@@ -161,17 +177,16 @@ class PipelineOrchestrator:
 
     # ── Bước EDA ───────────────────────────────────────────────────────────
     def _run_eda(self, result: PipelineResult, request: PipelineRequest, plan: ProcessingPlan) -> None:
+        """Chạy các operation EDA theo thứ tự kế hoạch; chỉ thu thập payload (câu trả lời tổng hợp ở `_answer`)."""
         for step in plan.eda_steps:
             payload: EdaPayload = self._tools.get(f"eda_{step.op}").run(
                 table=step.table, columns=list(step.columns) or None, dataset_id=request.dataset_id, **step.params
             )  # dataset không tồn tại -> DatasetNotFoundError, không fallback
-            payload.text = self._tools.get("eda_answer").run(payload=payload, question=result.question)
+            # `eda[].text`: mô tả xác định riêng của operation này (câu trả lời chung do AnswerAgent tổng hợp)
+            payload.text = self._tools.get("answer_template").run(
+                question=result.question, evidence=AnswerEvidence(eda=[payload])
+            )
             result.eda.append(payload)
-        texts = [p.text for p in result.eda if p.text]
-        if texts:
-            joined = "\n\n".join(texts)
-            result.answer = f"{result.answer}\n\n{joined}" if result.answer else joined
-            result.answer_source = result.answer_source or "template"
         if plan.has_query:
             return  # trạng thái do phần truy vấn quyết định
         if not any(p.status == "ok" for p in result.eda):
@@ -219,14 +234,11 @@ class PipelineOrchestrator:
             return result
         if df is None or df.empty:
             result.status = PipelineStatus.EMPTY_RESULT
-            self._answer(result, request, None)
             return result
         result.df = df
         result.truncated = bool(df.attrs.get("truncated"))
 
-        # ── Stage 3: câu trả lời text (luôn có khi truy vấn thành công) ────────
-        self._answer(result, request, df)
-
+        # (Stage 3 — câu trả lời text — do `run()` tổng hợp sau khi mọi bước đã có kết quả)
         # ── Stage 4: biểu đồ — chỉ khi được yêu cầu; lỗi không ảnh hưởng kết quả ──
         if chart_plan.requested and self._viz_mode == "code":
             result.chart_origin = chart_plan.origin
@@ -234,19 +246,40 @@ class PipelineOrchestrator:
             self._chart(result, request, df, chart_plan.chart_type)
         return result
 
-    # ── Helpers ────────────────────────────────────────────────────────────
-    def _answer(self, result: PipelineResult, request: PipelineRequest, df: Optional[pd.DataFrame]) -> None:
-        use_llm = not request.use_mock_sql and result.sql_source not in ("mock", "error")
+    def _answer_evidence(self, result: PipelineResult, plan: ProcessingPlan) -> AnswerEvidence:
+        """Bằng chứng thực sự thu được: nhánh không chạy thì để trống (không tạo dữ liệu giả)."""
+        query: Optional[QueryEvidence] = None
+        if plan.has_query:
+            if result.status == PipelineStatus.NEEDS_CLARIFICATION:
+                query = QueryEvidence(status=QUERY_CLARIFICATION)
+            elif result.status == PipelineStatus.SQL_ERROR:
+                query = QueryEvidence(status=QUERY_ERROR)
+            elif result.status == PipelineStatus.EMPTY_RESULT or result.df is None:
+                query = QueryEvidence(status=QUERY_EMPTY)
+            else:
+                query = QueryEvidence(df=result.df, truncated=result.truncated, status=QUERY_OK)
+        return AnswerEvidence(query=query, eda=list(result.eda))
+
+    def _answer(self, result: PipelineResult, request: PipelineRequest, plan: ProcessingPlan) -> None:
+        """Stage 3: MỘT câu trả lời cho toàn bộ bằng chứng (query-only, EDA-only hoặc query + EDA)."""
+        evidence = self._answer_evidence(result, plan)
+        if not result.eda and evidence.query is not None and evidence.query.status in (QUERY_ERROR, QUERY_CLARIFICATION):
+            return  # chỉ có truy vấn và nó thất bại: không có gì để trả lời (trạng thái + lỗi đã nói rõ)
         try:
-            gen = self._answer_agent.generate(result.question, df, truncated=result.truncated, use_llm=use_llm)
+            gen = self._answer_agent.generate(result.question, evidence, use_llm=not request.use_mock_sql)
         except Exception as e:  # câu trả lời không bao giờ làm hỏng cả request
-            text = self._tools.get("template_answer").run(question=result.question, df=df, truncated=result.truncated)
-            result.answer, result.answer_source, result.answer_fallback_reason = text, "template", f"error: {e}"
+            vi = is_vietnamese(result.question)
+            result.answer = (
+                "Không tạo được câu trả lời tóm tắt; hãy xem bảng kết quả và các phần bên dưới." if vi
+                else "Could not generate a summary answer; please see the tables and sections below."
+            )
+            result.answer_source, result.answer_fallback_reason = "template", f"error: {type(e).__name__}: {e}"[:300]
             return
         result.answer = gen.text
         result.answer_source = gen.source
         result.answer_fallback_reason = gen.fallback_reason
 
+    # ── Biểu đồ ────────────────────────────────────────────────────────────
     def _chart_spec(self, result: PipelineResult, request: PipelineRequest, plan: ProcessingPlan) -> None:
         """Biểu đồ xác định: chọn loại theo mục tiêu + kiểu dữ liệu, dùng kết quả truy vấn/EDA đã có.
         Lỗi chỉ ghi vào chart_*; câu trả lời, bảng truy vấn và kết quả EDA được giữ nguyên."""
@@ -259,7 +292,7 @@ class PipelineOrchestrator:
         try:
             spec = self._tools.get("build_chart_spec").run(
                 plan=plan.chart, df=result.df, eda=result.eda, dataset_id=request.dataset_id,
-                vi=is_vi_question(result.question),
+                vi=is_vietnamese(result.question),
             )
             result.chart_type = spec.chart_type
             result.chart_meta = spec.meta

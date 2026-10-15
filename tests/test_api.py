@@ -171,7 +171,7 @@ def test_llm_answer_is_used_when_grounded(client_for):
     d = client.post("/api/query", json={"question": "Có bao nhiêu khách hàng?"}).json()
     assert d["status"] == "ok" and d["answer"]["source"] == "deepseek"
     assert d["answer"]["text"] == f"Có {n} khách hàng." and d["answer"]["fallback_reason"] is None
-    assert len(ds.calls) == 2 and "ONLY the query result" in ds.calls[1]["system"]
+    assert len(ds.calls) == 2 and "ONLY the evidence" in ds.calls[1]["system"]
     assert "n\n" in ds.calls[1]["prompt"]  # kết quả (CSV) có trong prompt trả lời
 
 
@@ -204,7 +204,7 @@ def test_answer_prompt_sends_only_limited_rows(client_for):
     client, _ = client_for(deepseek=ds, answer_max_rows=5)
     client.post("/api/query", json={"question": "List orders"})
     answer_prompt = ds.calls[1]["prompt"]
-    assert "Rows in result: 200; rows shown below: 5" in answer_prompt
+    assert "Rows in result: 200; columns: 1; rows shown below: 5" in answer_prompt
     assert len(answer_prompt.strip().splitlines()) < 15
 
 

@@ -94,6 +94,19 @@ def _render_answer_and_table(result: QueryResult) -> None:
         st.dataframe(result.df, width="stretch", height=min(400, 38 + 35 * len(result.df)))
 
 
+_FALLBACK_LABELS = {
+    "no_data": "không có số liệu để diễn giải",
+    "mock": "chế độ mock, không gọi LLM",
+    "llm_unavailable": "LLM chưa cấu hình / không sẵn sàng",
+    "empty_answer": "LLM trả lời rỗng",
+    "ungrounded_numbers": "câu của LLM có số không có trong kết quả",
+}
+
+
+def _fallback_label(reason: str) -> str:
+    return _FALLBACK_LABELS.get(reason, reason)  # llm_error: ... / error: ... giữ nguyên chi tiết
+
+
 _EDA_TITLES = {
     "table_overview": "Tổng quan bảng",
     "data_quality": "Chất lượng dữ liệu",
@@ -225,7 +238,7 @@ def _render_evidence(result: QueryResult) -> None:
                 f"- **Thời gian thực thi SQL:** {f'{ev.elapsed_ms} ms' if ev.elapsed_ms is not None else '—'}\n"
                 f"- **Nguồn SQL:** {ev.sql_source}\n"
                 f"- **Nguồn câu trả lời:** {result.answer.source if result.answer else '—'}"
-                + (f" _(dùng câu mẫu: {result.answer.fallback_reason})_" if result.answer and result.answer.fallback_reason else "")
+                + (f" _(dùng câu mẫu: {_fallback_label(result.answer.fallback_reason)})_" if result.answer and result.answer.fallback_reason else "")
             )
         with tab_prompt:
             st.caption("Prompt gửi cho bước sinh SQL:")

@@ -8,6 +8,26 @@ from __future__ import annotations
 
 import ast
 import re
+import unicodedata
+
+# Sau khi tách dấu (NFD): chữ đ, dấu thanh (huyền/sắc/ngã/hỏi/nặng), dấu mũ/trăng/móc — không có trong tiếng Anh.
+_VI_MARKS = re.compile("[đĐ\u0300\u0301\u0303\u0309\u0323\u0302\u0306\u031b]")
+# Một số từ khóa tiếng Việt không dấu thường gặp trong câu hỏi về dữ liệu.
+_ASCII_VI = re.compile(
+    r"\b(tong quan|gia tri|thieu|trung lap|tuong quan|thong ke|bao nhieu|cot|bang|du lieu|phan phoi|kiem tra|"
+    r"chat luong|khuyet|cho toi|hay)\b"
+)
+
+
+def is_vietnamese(text: str) -> bool:
+    """Câu có phải tiếng Việt không (có dấu, hoặc không dấu nhưng chứa từ khóa thường gặp).
+
+    Đây là helper ngôn ngữ DUY NHẤT của hệ thống: Planner, câu trả lời mẫu (query/EDA) và Answer Agent đều dùng.
+    """
+    if _VI_MARKS.search(unicodedata.normalize("NFD", text or "")):
+        return True
+    ascii_text = unicodedata.normalize("NFD", text or "").encode("ascii", "ignore").decode().lower()
+    return bool(_ASCII_VI.search(ascii_text))
 
 
 def extract_sql(raw: str) -> str:

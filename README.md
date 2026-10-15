@@ -54,7 +54,7 @@ Data-Analytics-System/
 │   ├── llm/                   # base.py, deepseek_client.py, ollama_client.py
 │   ├── prompts/
 │   │   ├── sql_prompts.py     # DAIL-SQL cho demo DB; prompt theo schema (không few-shot) cho dataset upload
-│   │   ├── answer_prompts.py  # prompt câu trả lời text (chỉ gửi tối đa N dòng kết quả)
+│   │   ├── answer_prompts.py  # prompt Answer Agent (bằng chứng query/EDA đã giới hạn; chỉ số liệu có trong bằng chứng)
 │   │   ├── planner_prompts.py # prompt planner: LLM lập kế hoạch JSON {steps, chart, clarification}; chỉ nhận schema
 │   │   └── viz_prompts.py     # Zero-shot Context + Requirement + Constraint
 │   ├── database/
@@ -67,12 +67,12 @@ Data-Analytics-System/
 │   │   ├── viz_tools.py       # render_chart: exec code matplotlib → PNG
 │   │   ├── planner.py         # kế hoạch xử lý: validator hợp đồng JSON của LLM (steps/chart) + quy tắc dự phòng — hàm thuần
 │   │   ├── eda_tools.py       # 5 EDA tool xác định: overview, data_quality, numeric_summary, categorical_summary, correlation
-│   │   ├── eda_text.py        # câu trả lời text cho EDA (template, số liệu lấy từ payload)
 │   │   ├── intent.py          # nhận diện yêu cầu vẽ biểu đồ / xem SQL trong câu hỏi (hàm thuần)
-│   │   ├── answer_tools.py    # template_answer + answer_is_grounded (kiểm tra số liệu)
+│   │   ├── answer_evidence.py # AnswerEvidence/QueryEvidence (hợp đồng đầu vào của Answer Agent), ngữ cảnh gửi LLM, answer_is_grounded — hàm thuần
+│   │   ├── answer_templates.py# template fallback xác định cho query / EDA / query + EDA + tool `answer_template`; missing_caveats
 │   │   ├── mocks.py           # mock_sql, mock_viz_code
-│   │   └── text_utils.py      # clean_code, is_valid_code, extract_sql (hàm thuần)
-│   ├── agents/                # planner_agent.py (LLM lập kế hoạch query/EDA/chart), sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
+│   │   └── text_utils.py      # clean_code, is_valid_code, extract_sql, is_vietnamese (hàm thuần)
+│   ├── agents/                # planner_agent.py (LLM lập kế hoạch query/EDA/chart), sql_agent.py (SQL), answer_agent.py (câu trả lời text DÙNG CHUNG cho query/EDA/kết hợp), viz_agent.py (biểu đồ)
 │   └── pipeline/
 │       └── orchestrator.py    # PipelineOrchestrator (kế hoạch → query và/hoặc EDA → câu trả lời → biểu đồ tùy chọn) + DatasetService (cầu nối api → tools)
 ├── frontend/
@@ -109,10 +109,9 @@ Data-Analytics-System/
 1. SQLAgent.generate(question, dataset_id)  prompt theo schema → LLM → SQL; `-- CLARIFY:` → "needs_clarification" (dừng)
                                             lỗi gọi LLM → "sql_error" (không đem câu chú thích đi chạy)
 2. tool execute_sql(sql, dataset_id)        chỉ-đọc, timeout, giới hạn dòng; lỗi → "sql_error"; 0 dòng → "empty_result"
-3. AnswerAgent.generate(question, df)       LUÔN chạy khi truy vấn thành công: câu trả lời text ngắn
-                                            LLM (chỉ nhận cột + tối đa ANSWER_MAX_ROWS dòng đầu) → answer_is_grounded
-                                            → nếu số liệu không có trong kết quả / LLM lỗi / mock → tool template_answer
-4. (tùy chọn) EDA                          các bước EDA trong kế hoạch (mục 6c)
+3. (tùy chọn) EDA                          các bước EDA trong kế hoạch, theo thứ tự (mục 6c) → các EdaPayload
+4. AnswerAgent.generate(question, evidence) SAU KHI mọi bước đã chạy xong: MỘT câu trả lời text cho toàn bộ bằng chứng
+                                            (query-only | EDA-only | query + EDA, mục 6f); fallback → tool answer_template
 5. (tùy chọn) biểu đồ                       chỉ khi người dùng yêu cầu: tool build_chart_spec (chọn loại + chuẩn bị dữ liệu từ
                                             kết quả query/EDA) → tool render_chart_spec (giai đoạn 5, mục 6d)
                                             lỗi ở đây chỉ ghi vào `chart.status="error"`; text + bảng + EDA vẫn trả về
@@ -153,7 +152,8 @@ không dùng Ollama        → DeepSeek (nếu có key) → mock
 
 ```
 status    ok | sql_error | empty_result | needs_clarification | eda_error   (phần truy vấn/trả lời; eda_error: kế hoạch chỉ có EDA và mọi operation lỗi)
-answer    {text, source, fallback_reason}  câu trả lời text (có cả khi kết quả rỗng; null khi lỗi SQL/cần làm rõ)
+answer    {text, source, fallback_reason}  MỘT câu trả lời text cho toàn bộ bằng chứng query/EDA (có cả khi kết quả rỗng; null khi chỉ có truy vấn và nó lỗi/cần làm rõ);
+                                          source = tên LLM | template; fallback_reason (mục 6f) = null khi dùng câu của LLM
 clarification   câu hỏi làm rõ (khi needs_clarification)
 table     {columns, rows}                  bảng kết quả (bằng chứng)
 evidence  {sql, sql_source, sql_prompt, sql_error, show_sql, row_count, column_count, truncated, elapsed_ms}
@@ -232,7 +232,7 @@ Mở `http://localhost:8501`. Không có key và không có Ollama thì app vẫ
 2. Chọn dataset ở sidebar (demo hoặc các tệp đã upload trong phiên), xem schema, rồi hỏi ở ô chat (hoặc bấm một bong bóng gợi ý phía trên ô nhập; bong bóng **Tổng quan dataset** chỉ là một câu hỏi bình thường: planner định tuyến sang `table_overview` cho các bảng của dataset (số dòng/cột, kiểu, NULL, số giá trị phân biệt, ghi chú import), không có luồng riêng; khung chat tự cuộn tới tin nhắn mới nhất). Phản hồi gồm câu trả lời + bảng; SQL nằm trong **🔎 Bằng chứng / SQL** (đóng sẵn, tự mở khi bạn hỏi “cho xem SQL”). Muốn biểu đồ, nêu loại ngay trong câu hỏi: “vẽ biểu đồ cột / đường / tròn / phân tán …”. Hướng dẫn cài Ollama nằm trong sidebar, mục vẽ biểu đồ.
 3. Bảng không có khóa ngoại sẽ **không** bị tự JOIN. Nếu câu hỏi cần JOIN, hệ thống hỏi lại; bạn khai báo quan hệ ở **🔗 Quan hệ giữa các bảng** (sidebar) rồi hỏi lại.
 
-Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mất khi tải lại trang (dữ liệu vẫn nằm trong `data/datasets/`; xem/xóa/hết hạn dataset là giai đoạn 6).
+Lưu ý: danh sách dataset của phiên lưu trong `st.session_state` nên mất khi tải lại trang (dữ liệu vẫn nằm trong `data/datasets/`; xem/xóa/hết hạn dataset là giai đoạn 8).
 
 Ví dụ câu hỏi EDA: “Tổng quan dữ liệu”, “Kiểm tra giá trị thiếu và trùng lặp của bảng orders”, “Thống kê mô tả cột revenue của orders”, “Top giá trị phổ biến của cột region”, “Tương quan giữa các cột số của orders”, và câu kết hợp “Doanh thu theo vùng và kiểm tra giá trị thiếu của orders”.
 
@@ -248,7 +248,7 @@ Ví dụ câu hỏi EDA: “Tổng quan dữ liệu”, “Kiểm tra giá trị
 - **SQLite:** mở chỉ đọc rồi *tạo lại* bảng trong DB mới (giữ khóa ngoại/ràng buộc); bỏ view, trigger, bảng ảo, index; authorizer chặn ATTACH/PRAGMA/hàm nguy hiểm.
 - **Giới hạn mặc định:** 50 MB/tệp (kiểm tra cả Content-Length trước khi nhận), 300 MB sau giải nén `.xlsx`, 500 MB SQLite tạo ra, 200.000 dòng/bảng, 500 cột, 50 sheet, 60 giây import.
 - **Truy vấn:** kết nối `mode=ro` + authorizer (chỉ SELECT; INSERT/UPDATE/DELETE/DDL/PRAGMA/ATTACH và nhiều statement bị từ chối), timeout 10 giây, tối đa 1000 dòng / 2 MB kết quả (cắt thì `truncated=true`). Áp dụng cho cả demo DB.
-- **Hạn chế đã biết:** CSV dấu thập phân kiểu Việt (`12,5`) giữ TEXT; CSV luôn coi dòng đầu là tiêu đề; Excel ô gộp không được trải; việc "không JOIN khi chưa có quan hệ" dựa vào prompt (chưa có bộ kiểm tra SQL sau sinh); chưa có liệt kê/xóa/hết hạn dataset và cô lập theo phiên (giai đoạn 6).
+- **Hạn chế đã biết:** CSV dấu thập phân kiểu Việt (`12,5`) giữ TEXT; CSV luôn coi dòng đầu là tiêu đề; Excel ô gộp không được trải; việc "không JOIN khi chưa có quan hệ" dựa vào prompt (chưa có bộ kiểm tra SQL sau sinh); chưa có liệt kê/xóa/hết hạn dataset và cô lập theo phiên (giai đoạn 8).
 
 ---
 
@@ -281,7 +281,7 @@ SQLite vẫn là định dạng lưu trữ chuẩn. EDA **không** phải chatbo
 
 **Giới hạn** (`.env`): `EDA_MAX_COLUMNS` 50, `EDA_TOP_K` 10, `EDA_SAMPLE_ROWS` 50000 (dữ liệu đưa sang pandas; vượt thì lấy mẫu có hệ thống mỗi k dòng), `EDA_TIMEOUT` 20 s mỗi operation (cộng timeout 10 s mỗi câu SQL), `EDA_CORR_MAX_COLUMNS` 15, `EDA_MAX_TABLES` 10. Payload ghi rõ: `exact` (False nếu lấy mẫu / cắt cột / hết thời gian), `sampled` + `sample_info`, `truncated`, `warnings`, `definitions` (cách tính) và `queries` (SQL đã chạy, hiển thị trong “Bằng chứng / SQL”). Câu trả lời text của EDA là template xác định dựng từ payload nên không có số nào ngoài kết quả.
 
-**Chưa làm (giai đoạn sau):** phát hiện ngoại lai; quản lý dataset (giai đoạn 6). Biểu đồ từ kết quả EDA: xem mục 6d.
+**Chưa làm (giai đoạn sau):** phát hiện ngoại lai; quản lý dataset (giai đoạn 8). Biểu đồ từ kết quả EDA: xem mục 6d.
 
 ---
 
@@ -359,6 +359,39 @@ LLM lập **một kế hoạch thống nhất** cho mỗi câu hỏi; regex khô
 
 ---
 
+## 6f. Answer Agent dùng chung (giai đoạn 7)
+
+Một agent duy nhất (`agents/answer_agent.py`) viết câu trả lời text cho **query-only, EDA-only và query + EDA**. Orchestrator chỉ gọi nó **một lần, sau khi mọi bước của kế hoạch đã chạy xong**, và chỉ với bằng chứng thực sự thu được.
+
+**Hợp đồng đầu vào** (`tools/answer_evidence.py`): `AnswerEvidence(query: QueryEvidence | None, eda: list[EdaPayload])`.
+`QueryEvidence` = bảng kết quả đã giới hạn + `truncated` + `status` (`ok|empty|error|needs_clarification`); `eda` = các `EdaPayload` theo thứ tự kế hoạch (operation, bảng/cột, summary, bảng kết quả, cảnh báo, `exact/sampled/truncated`, `status ok|not_applicable|error`). Nhánh không chạy thì để trống — không có dữ liệu giả. Nếu chỉ có truy vấn và nó lỗi/cần làm rõ thì không có câu trả lời (`answer=null`; trạng thái và lỗi đã nói rõ ở response).
+
+**Ranh giới trách nhiệm:** tools tính toán (SQL, `eda_*`), Answer Agent chỉ *diễn giải* kết quả đó. Bảng query, SQL/bằng chứng, bảng EDA và biểu đồ vẫn là các phần hiển thị riêng của response; `eda[].text` là mô tả xác định riêng của từng operation (tool `answer_template`).
+
+**Ngữ cảnh gửi LLM** (`build_evidence_context`): theo từng nhánh, chỉ gồm tên cột, số liệu tóm tắt (cắt ở `_SUMMARY_CHARS`), tối đa `ANSWER_MAX_ROWS` dòng đầu của mỗi bảng (ô dài bị cắt), cảnh báo/định nghĩa và cờ `exact / sampled / truncated`. Không gửi SQL, prompt nội bộ hay dữ liệu ngoài bằng chứng.
+
+**Grounding:** `answer_is_grounded` cho phép đúng các số có trong ngữ cảnh đã gửi (cùng nguồn với prompt) và trong câu hỏi, có sai số làm tròn; số tự tính (tổng, %, xu hướng) bị từ chối.
+
+**Trạng thái không đầy đủ không bị che:** sau khi LLM trả lời, `missing_caveats` tự nối thêm câu lưu ý xác định nếu LLM bỏ sót: kết quả query bị cắt, số liệu EDA ước tính trên mẫu/bị giới hạn, operation EDA lỗi hoặc không áp dụng được (kể cả khi operation khác thành công), phần query không thực hiện được.
+
+**Template fallback** (`tools/answer_templates.py`, tool `answer_template`): hợp nhất các phần theo thứ tự query → từng operation EDA, tiếng Việt/Anh theo câu hỏi. `answer.source`/`fallback_reason` ghi nhận nhất quán cho mọi loại bằng chứng:
+
+| `source`   | `fallback_reason`                   | Khi nào                                                                  |
+| ------------ | ------------------------------------- | ------------------------------------------------------------------------- |
+| tên LLM     | `null`                              | câu của LLM, bám bằng chứng                                          |
+| `template` | `no_data`                           | không có số liệu để diễn giải (0 dòng, mọi operation EDA lỗi)  |
+| `template` | `mock`                              | `use_mock_sql=true` (không gọi cloud LLM)                             |
+| `template` | `llm_unavailable`                   | chưa cấu hình LLM                                                      |
+| `template` | `llm_error: ...` / `empty_answer` | gọi LLM lỗi / trả lời rỗng                                           |
+| `template` | `ungrounded_numbers`                | câu của LLM có số không có trong bằng chứng                       |
+| `template` | `error: ...`                        | Answer Agent gặp lỗi bất ngờ (response vẫn giữ bảng/SQL/EDA/chart) |
+
+**Phân loại tools sau khi rà soát** (`tools/__init__.py`): *tool thực thi* (đăng ký trong registry): schema/SQL/dataset, 5 tool `eda_*`, `build_chart_spec`/`render_chart_spec`/`render_chart`, `mock_*`; *template fallback*: một tool `answer_template` (thay `template_answer` + `eda_answer`; `EdaAnswerTool`, `summarize_payload` và `eda_text.py` đã gộp vào `answer_templates.py`); *hàm tiện ích thuần*: `answer_evidence`, `text_utils` (có `is_vietnamese` — helper ngôn ngữ duy nhất, thay `is_vietnamese` + `is_vi_question`), `intent`, `planner`, `chart_select`. Các re-export không ai import qua `backend.tools` (`CHART_HINTS`, `ChartPlan`, `EDA_OPERATIONS`, `EdaTool`, `ChartMeta`, `ChartSpec`, `ChartRender`, `execute_viz_code`) đã bỏ khỏi `__init__` (vẫn import được từ module gốc).
+
+**Thay đổi hành vi so với giai đoạn 6:** (1) câu hỏi chỉ có EDA giờ cũng đi qua LLM trả lời (có grounding) khi có LLM — trước đây luôn dùng template; (2) câu hỏi kết hợp có **một** câu trả lời thống nhất thay vì ghép "câu query + các đoạn EDA" (khi dùng template thì kết quả vẫn là chuỗi các đoạn như cũ); (3) `fallback_reason` giờ cũng có giá trị khi chọn mock / chưa cấu hình LLM / không có số liệu (trước là `null`); (4) câu hỏi tiếng Việt không dấu cũng được trả lời mẫu bằng tiếng Việt cho nhánh query.
+
+---
+
 ## 7. Cách mở rộng
 
 - **Thêm tool:** tạo class kế thừa `Tool` trong `backend/tools/` (đặt `name`, `description`, cài `run`), đăng ký trong `container.build_container`, rồi agent/pipeline gọi `tools.get("tên").run(...)`.
@@ -414,5 +447,6 @@ Vì yêu cầu là giữ nguyên chức năng, các điểm sau vẫn như bản
 - **Chạy thật** backend bằng uvicorn + frontend bằng Streamlit `AppTest`: demo, upload sai định dạng (lỗi hiển thị, giữ UI), upload CSV → tự chọn dataset → chạy pipeline (mock) ra đúng bảng, upload SQLite có khóa ngoại, thêm quan hệ, đổi lại demo.
 - **Chưa thử** với Ollama thật hoặc DeepSeek API key thật (mới qua LLM giả): bạn nên chạy thử một lần với môi trường của mình, đặc biệt hành vi `-- CLARIFY:` của model thật.
 - **Giai đoạn 3 (có test):** nhận diện yêu cầu vẽ/SQL (có và không, phủ định, "cột"≠biểu đồ cột), loại biểu đồ cụ thể, tùy chọn `none`/`auto`, lỗi biểu đồ vẫn giữ text + bảng + SQL, lỗi cả stage biểu đồ bị cô lập, kết quả rỗng / SQL lỗi / cần làm rõ, câu trả lời LLM bám số liệu và fallback câu mẫu khi số liệu không có trong kết quả, chỉ gửi tối đa `ANSWER_MAX_ROWS` dòng cho LLM, kết quả bị cắt được báo trong câu trả lời. Frontend kiểm tra bằng Streamlit `AppTest` và ảnh chụp trình duyệt thật (chế độ mock).
+- **Giai đoạn 7 (có test, `tests/test_answer_agent.py`):** bằng chứng query-only / EDA-only / query + EDA (thứ tự kế hoạch, nhánh không chạy không có dữ liệu giả), ngữ cảnh gửi LLM bị giới hạn (dòng/ô/số liệu tóm tắt), grounding trên số của payload EDA (từ chối số tự tính), nối lưu ý khi kết quả cắt/ước tính trên mẫu/operation lỗi/phần query lỗi, fallback template nhất quán cho cả ba loại bằng chứng (`no_data|mock|llm_unavailable|llm_error|empty_answer|ungrounded_numbers`), một lời gọi trả lời duy nhất cho lượt kết hợp, Answer Agent lỗi không làm mất bảng/SQL/EDA/chart, kiểm kê tools.
 - **Chưa thử** câu trả lời của LLM thật: kiểm tra bám số liệu khá chặt (số tự tính, làm tròn, đổi đơn vị sẽ bị loại và dùng câu mẫu) — nên xem tỷ lệ `fallback_reason=ungrounded_numbers` trên model thật. Câu mẫu chọn tiếng Việt khi câu hỏi có dấu; tiếng Việt không dấu sẽ ra tiếng Anh.
 - **Test cũ fail sẵn:** `tests/test_llm_client.py::test_retries_with_max_completion_tokens_when_model_rejects_max_tokens` (phụ thuộc cách patch `openai` của phiên bản thư viện hiện tại), không liên quan giai đoạn 3.

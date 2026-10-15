@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 from backend.config import Settings
 from backend.llm import LLMClient
 from backend.prompts import build_planner_prompt, build_planner_system_prompt
-from backend.tools import CHART_GOALS, CHART_TYPES, ToolRegistry, detect_sql_request, is_vi_question, resolve_chart_plan
+from backend.tools import CHART_GOALS, CHART_TYPES, ToolRegistry, detect_sql_request, is_vietnamese, resolve_chart_plan
 from backend.tools.planner import PlanError, PlanOutcome, ProcessingPlan, draft_plan, validate_llm_plan, validate_plan
 
 
@@ -58,7 +58,7 @@ class PlannerAgent:
         use_llm: bool = True,
     ) -> PlanOutcome:
         schema = self._tools.get("describe_schema").run(dataset_id=dataset_id)
-        vi = is_vi_question(question)
+        vi = is_vietnamese(question)
         show = show_sql or detect_sql_request(question)
 
         reason = self._llm_unavailable_reason(use_llm)

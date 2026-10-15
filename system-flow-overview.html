@@ -85,31 +85,50 @@
       font-weight: 600;
     }
     .horizontal-flow {
-      display: grid;
-      grid-template-columns: minmax(170px, 0.65fr) 34px minmax(0, 3.5fr) 34px minmax(170px, 0.65fr);
-      min-width: 1380px;
-      align-items: center;
-      gap: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
-    .flow-scroll { overflow-x: auto; padding-bottom: 10px; }
+    .flow-scroll { overflow: visible; }
     .source-column, .output-column {
       display: grid;
       gap: 13px;
-      align-content: center;
+      width: 100%;
     }
     .side-arrow {
-      display: grid;
-      place-items: center;
-      color: #7890a7;
-      font-size: 30px;
-      font-weight: 300;
+      display: none;
     }
     .branches {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       align-items: stretch;
       gap: 14px;
     }
+    .evidence-merge {
+      margin-top: 14px;
+      padding: 11px 14px;
+      border: 1px dashed #b9c8d7;
+      border-radius: 12px;
+      background: #f7f9fc;
+      color: #52677d;
+      font-size: 13px;
+      text-align: center;
+    }
+    .post-analysis {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .answer-flow {
+      padding: 15px;
+      border: 1px solid #cfc5f2;
+      border-radius: 15px;
+      background: var(--purple);
+      text-align: center;
+    }
+    .answer-flow p { color: #52647d; font-size: 14px; }
+    .answer-flow .model { background: #fff; }
     .branch {
       padding: 16px;
       border: 1px solid var(--line);
@@ -172,16 +191,14 @@
     }
     .query-steps {
       display: grid;
-      grid-template-columns: 1fr 20px 1fr 20px 1fr;
+      grid-template-columns: 1fr;
       align-items: center;
-      gap: 4px;
+      gap: 8px;
     }
     .query-steps .flow-down {
-      height: auto;
-      transform: rotate(-90deg);
+      height: 18px;
     }
     .chart-flow {
-      margin-top: 14px;
       padding: 13px 16px;
       border: 1px dashed #d5b4bd;
       border-radius: 13px;
@@ -247,7 +264,8 @@
     @media (max-width: 650px) {
       main { width: min(100% - 24px, 560px); padding-top: 24px; }
       header p { font-size: 15px; }
-      .flow-scroll { margin-right: -12px; }
+      .branches { grid-template-columns: 1fr; }
+      .operations { grid-template-columns: 1fr 1fr; }
     }
     @media print {
       body { background: #fff; }
@@ -273,7 +291,7 @@
     <div class="horizontal-flow">
       <div class="source-column">
         <section class="card input" aria-labelledby="input-title">
-          <h2 id="input-title">Đầu vào</h2>
+          <h2 id="input-title">1. Đầu vào</h2>
           <div class="input-grid">
             <div class="input-item"><strong>Dữ liệu</strong><br>Demo hoặc CSV, Excel, SQLite</div>
             <div class="input-item"><strong>Yêu cầu</strong><br>Câu hỏi bằng ngôn ngữ tự nhiên</div>
@@ -284,22 +302,44 @@
 
         <section class="card planner" aria-labelledby="planner-title">
           <span class="kind agent-kind">AGENT · LLM</span>
-          <h2 id="planner-title">Planner Agent</h2>
-          <p>Đọc schema và câu hỏi, lập kế hoạch thống nhất gồm các bước query/EDA và yêu cầu biểu đồ.</p>
-          <span class="model">LLM theo cấu hình hiện tại: OpenAI · gpt-5.6-luna</span>
-          <span class="model">Nếu bật rules/mock hoặc LLM không khả dụng/lỗi: dùng planner quy tắc; kế hoạch lỗi/không rõ thì yêu cầu làm rõ</span>
+          <h2 id="planner-title">2. Planner Agent</h2>
+          <p>Đọc câu hỏi và schema; quyết định một hoặc nhiều thao tác cần thiết, các bước con và việc có cần biểu đồ không.</p>
+          <span class="model">LLM theo cấu hình: provider hiện tại</span>
+          <span class="model">Fallback quy tắc/mock nếu cần; yêu cầu làm rõ khi kế hoạch không hợp lệ hoặc câu hỏi còn mơ hồ</span>
         </section>
       </div>
 
-      <div class="side-arrow" aria-hidden="true">→</div>
+      <div class="down" aria-hidden="true">↓</div>
 
-      <div>
-        <div class="branches" aria-label="Các hướng xử lý">
+      <section aria-label="3. Các nhánh thao tác do Planner lựa chọn">
+        <h2>3. Các nhánh phân tích do Planner lựa chọn</h2>
+        <p class="branch-intro">Planner có thể chọn Query, EDA hoặc kết hợp cả hai. Đây là hai nguồn bằng chứng cho Answer Agent.</p>
+        <div class="branches">
+          <section class="branch query" aria-labelledby="query-title">
+            <h3 id="query-title">A. Hỏi đáp / truy vấn</h3>
+            <p class="branch-intro">Dùng khi cần lọc, tra cứu, tính tổng hợp hoặc so sánh cụ thể.</p>
+            <div class="query-steps">
+              <div class="step">
+                <span class="kind agent-kind">AGENT · LLM</span>
+                <h3>SQL Agent</h3>
+                <p>Sinh SQL phù hợp câu hỏi và schema.</p>
+                <span class="model">Cloud provider theo cấu hình; có fallback theo chế độ hệ thống</span>
+              </div>
+              <div class="flow-down" aria-hidden="true">↓</div>
+              <div class="step">
+                <span class="kind tool-kind">TOOL · SQLite</span>
+                <h3>Thực thi truy vấn</h3>
+                <p>Chỉ đọc; giới hạn thời gian và kích thước kết quả.</p>
+              </div>
+            </div>
+            <div class="combine">Bằng chứng: SQL, bảng kết quả, trạng thái và thông tin giới hạn</div>
+          </section>
+
           <section class="branch eda" aria-labelledby="eda-title">
-            <h2 id="eda-title">Khám phá dữ liệu (EDA)</h2>
-            <p class="branch-intro">Tổng quan, kiểm tra chất lượng và thống kê.</p>
+            <h3 id="eda-title">B. Khám phá dữ liệu (EDA)</h3>
+            <p class="branch-intro">Dùng khi cần tổng quan, chất lượng hoặc thống kê mô tả.</p>
             <div class="step">
-              <span class="kind tool-kind">EDA TOOLS · KHÔNG DÙNG LLM</span>
+              <span class="kind tool-kind">TOOL · TÍNH TOÁN XÁC ĐỊNH</span>
               <div class="operations">
                 <div class="operation"><strong>Tổng quan</strong>Số dòng, cột, kiểu dữ liệu</div>
                 <div class="operation"><strong>Chất lượng</strong>Giá trị thiếu, ô rỗng, dòng trùng</div>
@@ -309,65 +349,51 @@
                 <div class="operation"><strong>Phân phối</strong>Đặc điểm phân bố dữ liệu</div>
               </div>
             </div>
-            <div class="flow-down" aria-hidden="true">↓</div>
-            <div class="step">
-              <span class="kind tool-kind">EDA ANSWER TOOL · mẫu xác định</span>
-              <h3>Tổng hợp kết quả phân tích</h3>
-              <p>Tạo diễn giải từ payload EDA; không phải Agent/LLM.</p>
-            </div>
+            <div class="combine">Bằng chứng: EdaPayload gồm số liệu, trạng thái, cảnh báo, sampled/truncated</div>
           </section>
 
-          <section class="branch query" aria-labelledby="query-title">
-            <h2 id="query-title">Hỏi và truy vấn dữ liệu</h2>
-            <p class="branch-intro">Câu hỏi cần kết quả cụ thể, lọc, nhóm hoặc so sánh.</p>
-            <div class="query-steps">
-              <div class="step">
-                <span class="kind agent-kind">AGENT · LLM</span>
-                <h3>SQL Agent</h3>
-                <p>Chuyển câu hỏi thành truy vấn dữ liệu.</p>
-                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6-luna<br>Fallback mock nếu tắt LLM / thiếu API key</span>
-              </div>
-              <div class="flow-down" aria-hidden="true">↓</div>
-              <div class="step">
-                <span class="kind tool-kind">SQL TOOL</span>
-                <h3>Truy vấn dữ liệu</h3>
-                <p>Thực thi truy vấn chỉ đọc trên SQLite.</p>
-              </div>
-              <div class="flow-down" aria-hidden="true">↓</div>
-              <div class="step">
-                <span class="kind agent-kind">AGENT · LLM + kiểm tra grounding</span>
-                <h3>Answer Agent</h3>
-                <p>Tóm tắt kết quả dựa trên dữ liệu.</p>
-                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6-luna<br>Fallback: câu trả lời mẫu</span>
-              </div>
-            </div>
-          </section>
         </div>
-        <section class="chart-flow" aria-labelledby="chart-title">
-          <span class="kind agent-kind">Planner quyết định trong kế hoạch: có vẽ không, loại và mục tiêu</span>
-          <h3 id="chart-title">Kết quả query/EDA → chuẩn bị dữ liệu → render ảnh</h3>
-          <p><span class="kind tool-kind">VIZ_MODE=spec · mặc định theo cấu hình</span><br>BuildChartSpecTool chọn/chuẩn bị dữ liệu; RenderChartSpecTool tạo PNG, không cần LLM vẽ.</p>
-          <span class="model">VIZ_MODE=code: Viz Agent sinh mã bằng Ollama/cloud/mock; RenderChartTool thực thi để tạo PNG. Chỉ vẽ từ kết quả query, không hỗ trợ EDA-only.</span>
-        </section>
-      </div>
+      </section>
 
-      <div class="side-arrow" aria-hidden="true">→</div>
+      <div class="evidence-merge">
+        Query và/hoặc EDA tạo bằng chứng có cấu trúc. Nhánh không được chọn để trống; trạng thái lỗi/rỗng được giữ nguyên, không tạo dữ liệu giả.
+      </div>
+      <div class="down" aria-hidden="true">↓</div>
+
+      <section class="post-analysis" aria-label="4. Tổng hợp câu trả lời">
+        <section class="answer-flow" aria-labelledby="answer-title">
+          <span class="kind agent-kind">AGENT · LLM + kiểm tra grounding</span>
+          <h2 id="answer-title">4. Answer Agent dùng chung</h2>
+          <p>Nhận câu hỏi cùng bằng chứng query và/hoặc EDA sau khi các thao tác phân tích hoàn tất. Chỉ diễn giải số liệu có trong bằng chứng; làm rõ sampled, truncated hoặc operation lỗi.</p>
+          <span class="model">Fallback: answer_template xác định khi no_data, mock, LLM unavailable/error, câu trả lời rỗng hoặc không grounded</span>
+        </section>
+      </section>
+
+      <div class="down" aria-hidden="true">↓</div>
+
+      <section class="chart-flow" aria-labelledby="chart-title">
+        <span class="kind tool-kind">TOOL</span>
+        <h2 id="chart-title">5. Tạo biểu đồ tùy chọn</h2>
+        <p>Dùng kết quả query/EDA đã có; chạy sau bước tổng hợp câu trả lời. BuildChartSpecTool chuẩn bị dữ liệu và RenderChartSpecTool tạo ảnh theo loại biểu đồ phù hợp.</p>
+        <span class="model">Chế độ code cũ: Viz Agent sinh code, RenderChartTool thực thi; chỉ hỗ trợ kết quả query, không hỗ trợ EDA-only.</span>
+      </section>
+
+      <div class="down" aria-hidden="true">↓</div>
 
       <div class="output-column">
         <section class="card output" aria-labelledby="output-title">
-          <span class="kind rule-kind">KẾT QUẢ</span>
-          <h2 id="output-title">Kết quả trong khung chat</h2>
+          <h2 id="output-title">6. Kết quả: Phản hồi trong khung chat</h2>
           <div class="output-items">
-            <div class="output-item">Câu trả lời dễ hiểu</div>
-            <div class="output-item">Bảng dữ liệu và kết quả phân tích</div>
-            <div class="output-item">Biểu đồ nếu được yêu cầu</div>
+            <div class="output-item">Câu trả lời ngắn, dễ hiểu</div>
+            <div class="output-item">Bảng query / kết quả EDA và SQL làm bằng chứng</div>
+            <div class="output-item">Biểu đồ nếu được yêu cầu và tạo thành công</div>
           </div>
         </section>
-        <p class="chart-note">Biểu đồ có thể được tạo từ kết quả truy vấn hoặc kết quả EDA.</p>
+        <p class="chart-note">Planner đánh dấu yêu cầu biểu đồ trong kế hoạch; phần tạo ảnh chạy riêng sau Answer Agent và không thay thế câu trả lời/bằng chứng.</p>
       </div>
     </div>
     </div>
-    <footer>Planner dùng LLM làm đường chính để lập kế hoạch query/EDA/chart; quy tắc là đường dự phòng. Các Agent và tools phía sau thực thi đúng vai trò riêng.</footer>
+    <footer>Planner lập kế hoạch; query và EDA chạy theo kế hoạch rồi gom bằng chứng. Answer Agent dùng chung để diễn giải; biểu đồ là nhánh tùy chọn độc lập từ kết quả phân tích.</footer>
   </main>
 </body>
 </html>

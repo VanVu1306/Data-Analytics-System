@@ -139,22 +139,24 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 7 — Dùng chung Answer Agent cho query/EDA và tinh gọn tools
 
-- [ ] Mở rộng hợp đồng `AnswerAgent` để nhận câu hỏi cùng bằng chứng có cấu trúc từ một hoặc cả hai nguồn:
+- [X] Mở rộng hợp đồng `AnswerAgent` để nhận câu hỏi cùng bằng chứng có cấu trúc từ một hoặc cả hai nguồn:
 
-  - [ ] Kết quả query: dữ liệu bảng đã giới hạn, trạng thái truncation và thông tin cần thiết để diễn giải.
-  - [ ] Kết quả EDA: các `EdaPayload` theo thứ tự kế hoạch, gồm operation, bảng/cột, summary, dữ liệu kết quả và trạng thái/cảnh báo.
-  - [ ] Cho phép query-only, EDA-only và query + EDA; không yêu cầu nhánh không chạy phải tạo dữ liệu giả.
-- [ ] Điều chỉnh `PipelineOrchestrator` để tổng hợp câu trả lời sau khi đã thu thập xong mọi kết quả trong kế hoạch; không tự ý tạo câu trả lời cho nhánh nào không trả về bằng chứng.
-- [ ] Giữ bảng query, SQL/bằng chứng và kết quả biểu đồ là các trường/phần hiển thị riêng; câu trả lời ngắn chỉ diễn giải bằng chứng đã có.
-- [ ] Cập nhật prompt và kiểm tra grounding để câu trả lời chỉ dùng số liệu trong query/EDA payload; không để LLM tự tính phép phân tích hoặc suy luận vượt quá bằng chứng.
-- [ ] Đưa trạng thái sampled, truncated, lỗi hoặc không áp dụng được vào context câu trả lời; không trình bày số liệu ước lượng như kết quả đầy đủ và không che giấu lỗi một operation khi operation khác thành công.
-- [ ] Duy trì template xác định làm fallback khi LLM không khả dụng, trả lời rỗng, lỗi hoặc không bám bằng chứng; ghi nhận nguồn câu trả lời và lý do fallback nhất quán cho cả hai nhánh.
-- [ ] Kiểm kê tools/utilities theo trách nhiệm, nơi đăng ký, callers và exports trước khi thay đổi; xác định rõ thành phần nào là tool thực thi, template fallback hay hàm tiện ích thuần.
-- [ ] Tích hợp hoặc loại bỏ phần trùng lặp/chưa dùng chỉ khi hợp đồng và hành vi tương đương đã được xác nhận. Đặc biệt rà soát `EdaAnswerTool`/`summarize_payload`, template answer dùng cho query, các helper ngôn ngữ và exports/đăng ký trong `backend/tools/__init__.py` cùng `backend/container.py`.
-- [ ] Kiểm thử câu trả lời query-only, EDA-only, query + EDA; dữ liệu rỗng; một phần EDA lỗi; kết quả sampled/truncated; LLM lỗi/rỗng/không grounded; và bảo đảm bảng, SQL, chart cùng trạng thái API hiện tại không bị mất hoặc thay đổi ngoài ý muốn.
-- [ ] Cập nhật tài liệu kiến trúc/cách hoạt động để mô tả Answer Agent chung, fallback và ranh giới giữa agent tổng hợp với tools tính toán.
+  - [X] Kết quả query: dữ liệu bảng đã giới hạn, trạng thái truncation và thông tin cần thiết để diễn giải.
+  - [X] Kết quả EDA: các `EdaPayload` theo thứ tự kế hoạch, gồm operation, bảng/cột, summary, dữ liệu kết quả và trạng thái/cảnh báo.
+  - [X] Cho phép query-only, EDA-only và query + EDA; không yêu cầu nhánh không chạy phải tạo dữ liệu giả.
+- [X] Điều chỉnh `PipelineOrchestrator` để tổng hợp câu trả lời sau khi đã thu thập xong mọi kết quả trong kế hoạch; không tự ý tạo câu trả lời cho nhánh nào không trả về bằng chứng.
+- [X] Giữ bảng query, SQL/bằng chứng và kết quả biểu đồ là các trường/phần hiển thị riêng; câu trả lời ngắn chỉ diễn giải bằng chứng đã có.
+- [X] Cập nhật prompt và kiểm tra grounding để câu trả lời chỉ dùng số liệu trong query/EDA payload; không để LLM tự tính phép phân tích hoặc suy luận vượt quá bằng chứng.
+- [X] Đưa trạng thái sampled, truncated, lỗi hoặc không áp dụng được vào context câu trả lời; không trình bày số liệu ước lượng như kết quả đầy đủ và không che giấu lỗi một operation khi operation khác thành công.
+- [X] Duy trì template xác định làm fallback khi LLM không khả dụng, trả lời rỗng, lỗi hoặc không bám bằng chứng; ghi nhận nguồn câu trả lời và lý do fallback nhất quán cho cả hai nhánh.
+- [X] Kiểm kê tools/utilities theo trách nhiệm, nơi đăng ký, callers và exports trước khi thay đổi; xác định rõ thành phần nào là tool thực thi, template fallback hay hàm tiện ích thuần.
+- [X] Tích hợp hoặc loại bỏ phần trùng lặp/chưa dùng chỉ khi hợp đồng và hành vi tương đương đã được xác nhận. Đặc biệt rà soát `EdaAnswerTool`/`summarize_payload`, template answer dùng cho query, các helper ngôn ngữ và exports/đăng ký trong `backend/tools/__init__.py` cùng `backend/container.py`.
+- [X] Kiểm thử câu trả lời query-only, EDA-only, query + EDA; dữ liệu rỗng; một phần EDA lỗi; kết quả sampled/truncated; LLM lỗi/rỗng/không grounded; và bảo đảm bảng, SQL, chart cùng trạng thái API hiện tại không bị mất hoặc thay đổi ngoài ý muốn.
+- [X] Cập nhật tài liệu kiến trúc/cách hoạt động để mô tả Answer Agent chung, fallback và ranh giới giữa agent tổng hợp với tools tính toán.
 
 **Thành phần dự kiến:** `backend/agents/answer_agent.py`, `backend/prompts/answer_prompts.py`, `backend/tools/answer_tools.py`, `backend/tools/eda_text.py`, `backend/tools/text_utils.py`, `backend/tools/__init__.py`, `backend/container.py`, `backend/pipeline/orchestrator.py` và các kiểm thử agent/pipeline/API liên quan.
+
+**Ghi chú triển khai:** xem README mục 6f (hợp đồng `AnswerEvidence`, bảng lý do fallback, phân loại tools). Hợp nhất `template_answer` + `eda_answer` thành tool `answer_template`; `eda_text.py`/`answer_tools.py` thay bằng `answer_evidence.py` + `answer_templates.py`; helper ngôn ngữ gộp thành `text_utils.is_vietnamese`.
 
 ## Giai đoạn 8 — Quản lý dataset và quan hệ
 

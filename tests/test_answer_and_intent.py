@@ -3,11 +3,12 @@ import pandas as pd
 import pytest
 
 from backend.tools import (
+    AnswerEvidence,
     answer_is_grounded,
     detect_chart_request,
     detect_sql_request,
     resolve_chart_plan,
-    template_answer,
+    template_answer as _template_answer,
 )
 from tests.conftest import FakeLLM
 
@@ -72,6 +73,11 @@ def test_detect_sql_request():
 
 
 # ── Câu trả lời mẫu ──────────────────────────────────────────────────────────
+def template_answer(question, df, truncated=False):
+    """Query-only: bọc DataFrame thành bằng chứng (hợp đồng chung của Answer Agent từ giai đoạn 7)."""
+    return _template_answer(question, AnswerEvidence.from_query(df, truncated))
+
+
 def test_template_answers():
     one = pd.DataFrame({"total": [1234567.5]})
     assert "total = 1,234,567.5" in template_answer("Tổng doanh thu?", one)
@@ -95,6 +101,10 @@ def test_template_answer_handles_nulls_and_wide_rows():
 
 
 # ── Kiểm tra bám số liệu ─────────────────────────────────────────────────────
+def grounded(answer, question, df, max_rows):
+    return answer_is_grounded(answer, question, AnswerEvidence.from_query(df), max_rows)
+
+
 DF = pd.DataFrame({"region": ["Bắc", "Nam"], "revenue": [1234567.891, 98000.0], "month": ["2024-03", "2024-04"]})
 
 
@@ -110,7 +120,7 @@ DF = pd.DataFrame({"region": ["Bắc", "Nam"], "revenue": [1234567.891, 98000.0]
     ],
 )
 def test_grounded_answers_accepted(answer):
-    assert answer_is_grounded(answer, "Doanh thu theo vùng?", DF, max_rows=20)
+    assert grounded(answer, "Doanh thu theo vùng?", DF, max_rows=20)
 
 
 @pytest.mark.parametrize(
@@ -123,18 +133,18 @@ def test_grounded_answers_accepted(answer):
     ],
 )
 def test_ungrounded_answers_rejected(answer):
-    assert not answer_is_grounded(answer, "Doanh thu theo vùng?", DF, max_rows=20)
+    assert not grounded(answer, "Doanh thu theo vùng?", DF, max_rows=20)
 
 
 def test_numbers_beyond_sent_rows_are_not_grounded():
     df = pd.DataFrame({"n": list(range(1000, 1050))})
-    assert answer_is_grounded("Giá trị đầu là 1000.", "q", df, max_rows=5)
-    assert not answer_is_grounded("Giá trị cuối là 1049.", "q", df, max_rows=5)  # LLM không được thấy dòng này
-    assert answer_is_grounded("Có 50 dòng.", "q", df, max_rows=5)  # tổng số dòng được phép
+    assert grounded("Giá trị đầu là 1000.", "q", df, max_rows=5)
+    assert not grounded("Giá trị cuối là 1049.", "q", df, max_rows=5)  # LLM không được thấy dòng này
+    assert grounded("Có 50 dòng.", "q", df, max_rows=5)  # tổng số dòng được phép
 
 
 def test_numbers_from_question_are_allowed():
-    assert answer_is_grounded("Top 5 sản phẩm bán chạy nhất:", "Top 5 sản phẩm", pd.DataFrame({"a": ["x"]}), 20)
+    assert grounded("Top 5 sản phẩm bán chạy nhất:", "Top 5 sản phẩm", pd.DataFrame({"a": ["x"]}), 20)
 
 
 # ── Kết quả bị cắt ───────────────────────────────────────────────────────────
