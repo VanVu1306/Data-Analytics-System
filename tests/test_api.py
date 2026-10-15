@@ -162,14 +162,11 @@ def test_chart_stage_exception_is_isolated(client_for, monkeypatch):
 
 
 def test_llm_answer_is_used_when_grounded(client_for):
-    ds = FakeLLM(name="deepseek", response="SELECT COUNT(*) AS n FROM customers")
+    ds = FakeLLM(name="deepseek")
     client, c = client_for(deepseek=ds)
-    # lần gọi 1: SQL; lần gọi 2: câu trả lời
-    responses = iter(["SELECT COUNT(*) AS n FROM customers", "__ANSWER__"])
     n = c.repo.execute("SELECT COUNT(*) AS n FROM customers")[0]["n"][0]
-    ds.complete = lambda prompt, **kw: (ds.calls.append(dict(prompt=prompt, **kw)) or next(responses)).replace(
-        "__ANSWER__", f"Có {n} khách hàng."
-    )
+    # lần gọi 1: SQL; lần gọi 2: câu trả lời (lời gọi của planner được FakeLLM xử lý riêng)
+    ds.script("SELECT COUNT(*) AS n FROM customers", f"Có {n} khách hàng.")
     ds.available = True
     d = client.post("/api/query", json={"question": "Có bao nhiêu khách hàng?"}).json()
     assert d["status"] == "ok" and d["answer"]["source"] == "deepseek"
@@ -179,27 +176,17 @@ def test_llm_answer_is_used_when_grounded(client_for):
 
 
 def test_ungrounded_llm_answer_falls_back_to_template(client_for):
-    ds = FakeLLM(name="deepseek", response="")
+    ds = FakeLLM(name="deepseek").script(
+        "SELECT COUNT(*) AS n FROM customers", "Có 9999 khách hàng, tăng 25% so với năm trước.")
     client, c = client_for(deepseek=ds)
-    responses = iter(["SELECT COUNT(*) AS n FROM customers", "Có 9999 khách hàng, tăng 25% so với năm trước."])
-    ds.complete = lambda prompt, **kw: next(responses)
     d = client.post("/api/query", json={"question": "Có bao nhiêu khách hàng?"}).json()
     assert d["answer"]["source"] == "template" and d["answer"]["fallback_reason"] == "ungrounded_numbers"
     assert "9999" not in d["answer"]["text"] and "25" not in d["answer"]["text"]
 
 
 def test_answer_llm_error_falls_back_to_template(client_for):
-    ds = FakeLLM(name="deepseek", response="")
+    ds = FakeLLM(name="deepseek").script("SELECT COUNT(*) AS n FROM customers", RuntimeError("timeout"))
     client, _ = client_for(deepseek=ds)
-    calls = {"n": 0}
-
-    def complete(prompt, **kw):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return "SELECT COUNT(*) AS n FROM customers"
-        raise RuntimeError("timeout")
-
-    ds.complete = complete
     d = client.post("/api/query", json={"question": "How many customers?"}).json()
     assert d["status"] == "ok" and d["answer"]["source"] == "template"
     assert d["answer"]["fallback_reason"].startswith("llm_error")
@@ -213,12 +200,10 @@ def test_mock_sql_never_sends_results_to_llm(client_for):
 
 
 def test_answer_prompt_sends_only_limited_rows(client_for):
-    ds = FakeLLM(name="deepseek", response="")
+    ds = FakeLLM(name="deepseek").script("SELECT order_id FROM orders", "Có 200 dòng.")
     client, _ = client_for(deepseek=ds, answer_max_rows=5)
-    responses = iter(["SELECT order_id FROM orders", "Có 200 dòng."])
-    ds.complete = lambda prompt, **kw: (ds.calls.append(prompt), next(responses))[1]
     client.post("/api/query", json={"question": "List orders"})
-    answer_prompt = ds.calls[1]
+    answer_prompt = ds.calls[1]["prompt"]
     assert "Rows in result: 200; rows shown below: 5" in answer_prompt
     assert len(answer_prompt.strip().splitlines()) < 15
 

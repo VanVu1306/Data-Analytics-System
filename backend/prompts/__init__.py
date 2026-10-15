@@ -8,11 +8,11 @@ from backend.prompts.sql_prompts import (
     build_dataset_prompt,
 )
 from backend.prompts.answer_prompts import ANSWER_SYSTEM_PROMPT, build_answer_prompt
-from backend.prompts.planner_prompts import PLANNER_SYSTEM_PROMPT, build_planner_prompt
+from backend.prompts.planner_prompts import build_planner_prompt, build_planner_system_prompt
 from backend.prompts.viz_prompts import VIZ_CLOUD_SYSTEM_PROMPT, build_viz_prompt
 
 __all__ = [
-    "PLANNER_SYSTEM_PROMPT",
+    "build_planner_system_prompt",
     "build_planner_prompt",
     "ANSWER_SYSTEM_PROMPT",
     "build_answer_prompt",

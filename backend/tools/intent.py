@@ -24,6 +24,24 @@ CHART_TYPES = (
 CHART_GOALS = ("comparison", "trend", "distribution", "relationship", "composition")
 CHART_HINTS = ("detect", "none", "auto") + CHART_TYPES
 
+# Cách gọi ngắn của loại biểu đồ (LLM planner hay trả "bar", "pie"...) -> tên chuẩn trong allowlist
+_TYPE_ALIASES = {
+    "bar": "bar chart", "column chart": "bar chart", "line": "line chart", "pie": "pie chart", "donut": "pie chart",
+    "scatter": "scatter plot", "hist": "histogram", "kde": "kde plot", "density plot": "kde plot",
+    "box": "box plot", "boxplot": "box plot", "box-plot": "box plot", "violin": "violin plot",
+    "heat map": "heatmap", "count": "count plot", "countplot": "count plot",
+}
+
+
+def canonical_chart_type(value: object) -> Optional[str]:
+    """Tên loại biểu đồ chuẩn (thuộc CHART_TYPES) hoặc None nếu không nhận ra. Không phân biệt hoa/thường."""
+    if not isinstance(value, str):
+        return None
+    v = re.sub(r"\s+", " ", value.strip().lower().replace("_", " "))
+    v = _TYPE_ALIASES.get(v, v)
+    return v if v in CHART_TYPES else None
+
+
 _CHART_WORD = re.compile(
     r"biểu\s*đồ|đồ\s*thị|sơ\s*đồ|trực\s*quan|\bvẽ\b|"
     r"\bcharts?\b|\bplots?\b|\bgraphs?\b|\bvisuali[sz]\w*|\bhistogram\b|\bdraw\b"

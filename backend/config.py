@@ -96,6 +96,10 @@ class Settings:
     eda_corr_max_columns: int     # số cột số tối đa cho ma trận tương quan
     eda_max_tables: int           # số bảng tối đa khi một câu hỏi EDA áp dụng cho cả dataset
 
+    # ── Planner (giai đoạn 6) ──────────────────────────────────────────────
+    planner_mode: str             # "llm" (mặc định): LLM lập kế hoạch thống nhất | "rules": chỉ dùng quy tắc (không gọi LLM planner)
+    planner_max_tokens: int       # số token tối đa cho phản hồi kế hoạch JSON
+
     # ── Biểu đồ (giai đoạn 5) ──────────────────────────────────────────────
     viz_mode: str                 # "spec" (mặc định): bộ vẽ xác định, allowlist loại chart | "code": LLM sinh code matplotlib (cũ, exec)
     chart_max_categories: int     # số nhóm tối đa trên bar/count plot (vượt thì lấy top)
@@ -153,6 +157,8 @@ def load_settings() -> Settings:
         eda_timeout_seconds=_env_float("EDA_TIMEOUT", 20.0),
         eda_corr_max_columns=_env_int("EDA_CORR_MAX_COLUMNS", 15),
         eda_max_tables=_env_int("EDA_MAX_TABLES", 10),
+        planner_mode="rules" if _env_str("PLANNER_MODE", "llm").strip().lower() == "rules" else "llm",
+        planner_max_tokens=_env_int("PLANNER_MAX_TOKENS", 700),
         viz_mode=(_env_str("VIZ_MODE", "spec").strip().lower() if _env_str("VIZ_MODE", "spec").strip().lower() in ("spec", "code") else "spec"),
         chart_max_categories=_env_int("CHART_MAX_CATEGORIES", 30),
         chart_pie_max_slices=_env_int("CHART_PIE_MAX_SLICES", 8),

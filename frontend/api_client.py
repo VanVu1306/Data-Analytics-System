@@ -79,16 +79,20 @@ class PlanStep:
     table: Optional[str] = None
     columns: List[str] = field(default_factory=list)
     params: Dict[str, Any] = field(default_factory=dict)
+    question: Optional[str] = None        # câu hỏi con Planner giao cho bước
 
 
 @dataclass
 class Plan:
     """Kế hoạch xử lý mà hệ thống đã thực hiện."""
 
-    source: str                           # rules | llm | rules_fallback
+    source: str                           # llm | rules | rules_fallback
     steps: List[PlanStep] = field(default_factory=list)
     chart_requested: bool = False
     show_sql: bool = False
+    chart_type: Optional[str] = None      # None = hệ thống tự chọn loại theo dữ liệu
+    chart_goal: Optional[str] = None
+    fallback_reason: Optional[str] = None  # vì sao không dùng LLM planner (mock | planner_mode_rules | llm_unavailable | llm_error: ...)
 
 
 @dataclass
@@ -226,6 +230,9 @@ class NL2VizClient:
                 steps=[PlanStep(**st) for st in pl["steps"]],
                 chart_requested=pl.get("chart_requested", False),
                 show_sql=pl.get("show_sql", False),
+                chart_type=(pl.get("chart") or {}).get("type"),
+                chart_goal=(pl.get("chart") or {}).get("goal"),
+                fallback_reason=pl.get("fallback_reason"),
             )
         eda = []
         for e in d.get("eda", []):

@@ -283,11 +283,11 @@
         <div class="down" aria-hidden="true">↓</div>
 
         <section class="card planner" aria-labelledby="planner-title">
-          <span class="kind agent-kind">AGENT</span>
+          <span class="kind agent-kind">AGENT · LLM</span>
           <h2 id="planner-title">Planner Agent</h2>
-          <p>Hiểu ý định, xem cấu trúc dữ liệu và chọn cách phân tích phù hợp.</p>
-          <span class="kind rule-kind">Quy tắc định tuyến trước; gọi cloud LLM khi cần</span>
-          <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6</span>
+          <p>Đọc schema và câu hỏi, lập kế hoạch thống nhất gồm các bước query/EDA và yêu cầu biểu đồ.</p>
+          <span class="model">LLM theo cấu hình hiện tại: OpenAI · gpt-5.6-luna</span>
+          <span class="model">Nếu bật rules/mock hoặc LLM không khả dụng/lỗi: dùng planner quy tắc; kế hoạch lỗi/không rõ thì yêu cầu làm rõ</span>
         </section>
       </div>
 
@@ -325,7 +325,7 @@
                 <span class="kind agent-kind">AGENT · LLM</span>
                 <h3>SQL Agent</h3>
                 <p>Chuyển câu hỏi thành truy vấn dữ liệu.</p>
-                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6<br>Fallback mock nếu tắt LLM / thiếu API key</span>
+                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6-luna<br>Fallback mock nếu tắt LLM / thiếu API key</span>
               </div>
               <div class="flow-down" aria-hidden="true">↓</div>
               <div class="step">
@@ -338,15 +338,16 @@
                 <span class="kind agent-kind">AGENT · LLM + kiểm tra grounding</span>
                 <h3>Answer Agent</h3>
                 <p>Tóm tắt kết quả dựa trên dữ liệu.</p>
-                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6<br>Fallback: câu trả lời mẫu</span>
+                <span class="model">Cloud provider theo cấu hình: OpenAI · gpt-5.6-luna<br>Fallback: câu trả lời mẫu</span>
               </div>
             </div>
           </section>
         </div>
         <section class="chart-flow" aria-labelledby="chart-title">
-          <span class="kind rule-kind">NHÁNH TÙY CHỌN · khi người dùng yêu cầu biểu đồ</span>
-          <h3 id="chart-title">Từ kết quả truy vấn hoặc EDA → chọn loại biểu đồ → tạo ảnh</h3>
-          <p><span class="kind tool-kind">CHART TOOLS</span><br>BuildChartSpecTool chọn/chuẩn bị dữ liệu, RenderChartSpecTool vẽ và xuất PNG.</p>
+          <span class="kind agent-kind">Planner quyết định trong kế hoạch: có vẽ không, loại và mục tiêu</span>
+          <h3 id="chart-title">Kết quả query/EDA → chuẩn bị dữ liệu → render ảnh</h3>
+          <p><span class="kind tool-kind">VIZ_MODE=spec · mặc định theo cấu hình</span><br>BuildChartSpecTool chọn/chuẩn bị dữ liệu; RenderChartSpecTool tạo PNG, không cần LLM vẽ.</p>
+          <span class="model">VIZ_MODE=code: Viz Agent sinh mã bằng Ollama/cloud/mock; RenderChartTool thực thi để tạo PNG. Chỉ vẽ từ kết quả query, không hỗ trợ EDA-only.</span>
         </section>
       </div>
 
@@ -366,7 +367,7 @@
       </div>
     </div>
     </div>
-    <footer>Agent có nhãn tím; quy tắc/điều kiện có nhãn xám xanh; tools thực thi thao tác có nhãn xanh lá.</footer>
+    <footer>Planner dùng LLM làm đường chính để lập kế hoạch query/EDA/chart; quy tắc là đường dự phòng. Các Agent và tools phía sau thực thi đúng vai trò riêng.</footer>
   </main>
 </body>
 </html>

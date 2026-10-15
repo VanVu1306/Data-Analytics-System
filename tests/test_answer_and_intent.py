@@ -139,10 +139,8 @@ def test_numbers_from_question_are_allowed():
 
 # ── Kết quả bị cắt ───────────────────────────────────────────────────────────
 def test_truncated_result_is_flagged_in_answer(make_container):
-    ds = FakeLLM(name="deepseek", response="")
+    ds = FakeLLM(name="deepseek").script("SELECT order_id FROM orders", "Danh sách mã đơn hàng.")
     c = make_container(deepseek=ds, query_max_rows=50)
-    responses = iter(["SELECT order_id FROM orders", "Danh sách mã đơn hàng."])
-    ds.complete = lambda prompt, **kw: next(responses)
     from backend.pipeline import PipelineRequest
 
     r = c.orchestrator.run(PipelineRequest(question="Liệt kê đơn hàng"))

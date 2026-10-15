@@ -1,5 +1,6 @@
 """Giai đoạn 4: query + EDA trong cùng một lượt qua orchestrator/API; metadata import."""
 import io
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -109,12 +110,14 @@ def test_chart_request_with_eda_only_reports_chart_error_but_keeps_results(env):
 
 
 def test_query_failure_keeps_eda_results(env):
-    client, c = env(deepseek=FakeLLM(name="deepseek", response="SELECT cot_khong_co FROM diem"))
+    plan = json.dumps({"steps": [{"op": "query"}, {"op": "data_quality", "table": "diem"}],
+                       "chart": {"requested": False, "type": None, "goal": None}})
+    client, c = env(deepseek=FakeLLM(name="deepseek", response="SELECT cot_khong_co FROM diem", planner_response=plan))
     ds = _upload(client)["dataset_id"]
     d = client.post("/api/query", json={"question": "Cho xem theo lớp và kiểm tra giá trị thiếu của diem",
                                         "dataset_id": ds, "use_mock_viz": True}).json()
-    # LLM trả SQL (không phải JSON) cho planner -> câu hỏi làm rõ; không tự đoán
-    assert d["status"] == "needs_clarification" and d["eda"] == []
+    assert d["status"] == "sql_error" and d["plan"]["source"] == "llm"
+    assert d["eda"] and d["eda"][0]["status"] == "ok"  # truy vấn lỗi nhưng EDA vẫn được giữ
     d = _q(client, "Cho xem theo lớp và kiểm tra giá trị thiếu của diem", ds)  # mock: quy tắc
     assert d["status"] == "ok" and d["eda"]
 

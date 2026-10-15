@@ -8,6 +8,10 @@ Kế hoạch xử lý có cấu trúc (giai đoạn 4): hàm thuần, không g�
                       kế hoạch sai/mơ hồ -> `PlanError` mang câu hỏi làm rõ cho người dùng;
   * `ProcessingPlan`  danh sách bước đã xác thực + yêu cầu biểu đồ + yêu cầu hiển thị SQL.
 
+Giai đoạn 6: LLM (PlannerAgent) là cơ chế quyết định chính; các quy tắc dưới đây chỉ còn là phương án dự phòng khi
+LLM không dùng được (mock, PLANNER_MODE=rules, lỗi/hết hạn mức). `validate_llm_plan` kiểm tra TOÀN BỘ hợp đồng JSON của
+LLM {steps, chart, clarification} — sai ở đâu là hỏi lại người dùng, không chạy một phần kế hoạch.
+
 Quy tắc chỉ nhận một tập từ khóa EDA tường minh (tổng quan, giá trị thiếu, trùng lặp, thống kê mô tả,
 phân phối, tương quan...). Câu hỏi không chứa từ khóa EDA luôn là `query` (không gọi LLM planner);
 câu hỏi vừa có từ khóa EDA vừa có phần truy vấn (theo/by, tổng, top...) là "kết hợp" -> `needs_llm`.
@@ -20,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from backend.tools.eda_tools import CORRELATION_METHODS, OPERATIONS as EDA_OPERATIONS
-from backend.tools.intent import ChartPlan
+from backend.tools.intent import CHART_GOALS, CHART_TYPES, ChartPlan, canonical_chart_type, resolve_chart_plan
 
 OP_QUERY = "query"
 ALL_OPS = (OP_QUERY,) + EDA_OPERATIONS
@@ -37,10 +41,11 @@ class PlanStep:
     table: Optional[str] = None
     columns: Tuple[str, ...] = ()
     params: Dict[str, Any] = field(default_factory=dict)
-    question: Optional[str] = None            # chỉ cho `query`: câu hỏi con (mặc định: câu hỏi gốc)
+    question: Optional[str] = None            # câu hỏi con của bước (với `query`: câu hỏi gửi cho SQL Agent; mặc định câu gốc)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"operation": self.op, "table": self.table, "columns": list(self.columns), "params": dict(self.params)}
+        return {"operation": self.op, "table": self.table, "columns": list(self.columns), "params": dict(self.params),
+                "question": self.question}
 
 
 @dataclass
@@ -49,6 +54,7 @@ class ProcessingPlan:
     chart: ChartPlan
     show_sql: bool
     source: str = "rules"                      # rules | llm | rules_fallback
+    fallback_reason: Optional[str] = None      # vì sao không dùng LLM planner (source != "llm")
 
     @property
     def has_query(self) -> bool:
@@ -254,11 +260,13 @@ def validate_plan(
         if op not in ALL_OPS:
             raise err(f"Thao tác không được hỗ trợ: {op!r}.", f"Unsupported operation: {op!r}.")
 
+        question = raw.get("question")
+        if question is not None and (not isinstance(question, str) or len(question) > 1000):
+            raise err("Câu hỏi con của bước không hợp lệ.", "The step's sub-question is invalid.")
+        question = (question or "").strip() or None
+
         if op == OP_QUERY:
-            question = raw.get("question")
-            if question is not None and (not isinstance(question, str) or len(question) > 1000):
-                raise err("Câu hỏi con của bước truy vấn không hợp lệ.", "The query step's sub-question is invalid.")
-            out.append(PlanStep(OP_QUERY, question=(question or "").strip() or None))
+            out.append(PlanStep(OP_QUERY, question=question))
             continue
 
         columns = raw.get("columns") or []
@@ -306,7 +314,7 @@ def validate_plan(
                     raise err(f"Bảng '{t}' không có cột '{c}'.", f"Table '{t}' has no column '{c}'.")
                 if cc not in canon_cols:
                     canon_cols.append(cc)
-            out.append(PlanStep(op, t, tuple(canon_cols), dict(params)))
+            out.append(PlanStep(op, t, tuple(canon_cols), dict(params), question))
 
     queries = [s for s in out if s.op == OP_QUERY]
     if len(queries) > 1:
@@ -320,3 +328,80 @@ def validate_plan(
         raise err(f"Yêu cầu có quá nhiều bước (tối đa {max_steps}). Hãy thu hẹp câu hỏi.",
                   f"Too many steps (max {max_steps}). Please narrow the question.")
     return unique
+
+
+# ── Hợp đồng kế hoạch của LLM (giai đoạn 6) ────────────────────────────────
+def _parse_chart(raw_chart: Any, vi: bool) -> Optional[Tuple[bool, Optional[str], Optional[str]]]:
+    """Kiểm tra khối `chart` của LLM -> (requested, type, goal). Thiếu khối -> None. Sai -> PlanError.
+
+    type/goal có thể null (để hệ thống tự chọn khi đã có dữ liệu); type được đưa về tên chuẩn trong allowlist.
+    """
+    if raw_chart is None:
+        return None
+    if not isinstance(raw_chart, dict) or not isinstance(raw_chart.get("requested"), bool):
+        raise PlanError("Phần biểu đồ của kế hoạch không hợp lệ." if vi else "The chart part of the plan is invalid.")
+    raw_type = raw_chart.get("type", raw_chart.get("chart_type"))
+    ctype = None
+    if raw_type not in (None, ""):
+        ctype = canonical_chart_type(raw_type)
+        if ctype is None:
+            raise PlanError(
+                f"Loại biểu đồ không được hỗ trợ: {raw_type!r}. Hỗ trợ: {', '.join(CHART_TYPES)}." if vi
+                else f"Unsupported chart type: {raw_type!r}. Supported: {', '.join(CHART_TYPES)}."
+            )
+    goal = raw_chart.get("goal")
+    if goal in ("", None):
+        goal = None
+    elif not isinstance(goal, str) or goal.strip().lower() not in CHART_GOALS:
+        raise PlanError(
+            f"Mục tiêu trực quan không hợp lệ: {goal!r}. Hỗ trợ: {', '.join(CHART_GOALS)}." if vi
+            else f"Invalid chart goal: {goal!r}. Supported: {', '.join(CHART_GOALS)}."
+        )
+    else:
+        goal = goal.strip().lower()
+    if not raw_chart["requested"]:
+        return False, None, None  # không vẽ: bỏ qua type/goal thừa
+    return True, ctype, goal
+
+
+def resolve_planned_chart(raw_chart: Any, question: str, chart_hint: str = "detect", *, vi: bool = True) -> ChartPlan:
+    """Kết hợp khối `chart` của LLM với tùy chọn phụ `chart_hint` (tùy chọn phụ luôn được ưu tiên):
+
+      none     -> không vẽ, kể cả khi LLM cho là có yêu cầu
+      <loại>   -> vẽ đúng loại đó (mục tiêu lấy từ LLM)
+      auto     -> vẽ; loại/mục tiêu theo LLM, null = hệ thống tự chọn theo dữ liệu
+      detect   -> vẽ khi và chỉ khi LLM xác định người dùng có yêu cầu
+    Thiếu hẳn khối `chart` (LLM bỏ sót) -> dùng bộ nhận biết bằng quy tắc như trước. Khối sai -> PlanError.
+    """
+    parsed = _parse_chart(raw_chart, vi)  # kiểm tra cả khi chart_hint=none: kế hoạch sai thì hỏi lại
+    if parsed is None:
+        return resolve_chart_plan(question, chart_hint)
+    requested, ctype, goal = parsed
+    if chart_hint == "none":
+        return ChartPlan(False, None, "option")
+    if chart_hint in CHART_TYPES:
+        return ChartPlan(True, chart_hint, "option", goal)
+    if chart_hint == "auto":
+        return ChartPlan(True, ctype, "option", goal)
+    return ChartPlan(True, ctype, "prompt", goal) if requested else ChartPlan(False)
+
+
+@dataclass
+class LLMPlan:
+    steps: List[PlanStep]
+    chart: ChartPlan
+
+
+def validate_llm_plan(
+    obj: Any, question: str, schema: _SCHEMA, *, chart_hint: str = "detect", vi: bool = True, max_tables: int = 10,
+    max_steps: int = MAX_STEPS,
+) -> LLMPlan:
+    """Kiểm tra object JSON do LLM trả: steps (op, bảng, cột, tham số, tối đa 1 query), chart (loại, mục tiêu).
+
+    `clarification` do caller xử lý trước. Bất kỳ phần nào sai -> PlanError (câu hỏi làm rõ), không trả kế hoạch một phần.
+    """
+    if not isinstance(obj, dict):
+        raise PlanError("Kế hoạch xử lý không hợp lệ." if vi else "The processing plan is invalid.")
+    steps = validate_plan(obj.get("steps"), schema, vi=vi, max_tables=max_tables, max_steps=max_steps)
+    chart = resolve_planned_chart(obj.get("chart"), question, chart_hint, vi=vi)
+    return LLMPlan(steps, chart)

@@ -163,15 +163,27 @@ class PlanStepInfo(BaseModel):
     table: Optional[str] = None
     columns: List[str] = Field(default_factory=list)
     params: Dict[str, Any] = Field(default_factory=dict)
+    question: Optional[str] = None        # câu hỏi con Planner giao cho bước này (query: câu gửi cho SQL Agent)
+
+
+class PlanChartInfo(BaseModel):
+    """Phần `chart` của kế hoạch: người dùng có yêu cầu vẽ không, loại/mục tiêu nào (None = hệ thống tự chọn khi có dữ liệu)."""
+
+    requested: bool = False
+    type: Optional[str] = None
+    goal: Optional[str] = None            # comparison | trend | distribution | relationship | composition
+    origin: str = "none"                  # none | option (tùy chọn phụ chart_hint) | prompt (Planner nhận ra trong câu hỏi)
 
 
 class PlanInfo(BaseModel):
     """Kế hoạch xử lý đã xác thực mà hệ thống thực hiện cho câu hỏi."""
 
-    source: str                           # rules | llm | rules_fallback
+    source: str                           # llm | rules | rules_fallback
     steps: List[PlanStepInfo]
-    chart_requested: bool = False
+    chart: PlanChartInfo = Field(default_factory=PlanChartInfo)
+    chart_requested: bool = False         # = chart.requested (giữ cho client cũ)
     show_sql: bool = False
+    fallback_reason: Optional[str] = None  # vì sao không dùng LLM planner: mock | planner_mode_rules | llm_unavailable | llm_error: ...
 
 
 class EdaResultInfo(BaseModel):

@@ -201,7 +201,13 @@ def _render_evidence(result: QueryResult) -> None:
             steps = " → ".join(
                 s.operation + (f"({s.table})" if s.table else "") for s in result.plan.steps
             )
-            st.caption(f"Kế hoạch ({result.plan.source}): {steps}")
+            chart = ""
+            if result.plan.chart_requested:
+                chart = " · biểu đồ: " + (result.plan.chart_type or "tự chọn") + (
+                    f" ({result.plan.chart_goal})" if result.plan.chart_goal else "")
+            source = {"llm": "LLM", "rules": "quy tắc", "rules_fallback": "quy tắc (LLM lỗi)"}.get(
+                result.plan.source, result.plan.source)
+            st.caption(f"Kế hoạch ({source}): {steps}{chart}")
         tab_sql, tab_exec, tab_prompt = st.tabs(["SQL đã thực thi", "Thông tin thực thi", "Prompt (debug)"])
         with tab_sql:
             if ev.sql:

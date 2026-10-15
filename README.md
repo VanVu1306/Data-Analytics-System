@@ -55,7 +55,7 @@ Data-Analytics-System/
 │   ├── prompts/
 │   │   ├── sql_prompts.py     # DAIL-SQL cho demo DB; prompt theo schema (không few-shot) cho dataset upload
 │   │   ├── answer_prompts.py  # prompt câu trả lời text (chỉ gửi tối đa N dòng kết quả)
-│   │   ├── planner_prompts.py # prompt planner: LLM chỉ trả kế hoạch JSON (allowlist operation)
+│   │   ├── planner_prompts.py # prompt planner: LLM lập kế hoạch JSON {steps, chart, clarification}; chỉ nhận schema
 │   │   └── viz_prompts.py     # Zero-shot Context + Requirement + Constraint
 │   ├── database/
 │   │   ├── sqlite_repo.py     # SQLiteRepository: schema, execute CHỈ-ĐỌC (timeout, giới hạn dòng/kích thước)
@@ -65,14 +65,14 @@ Data-Analytics-System/
 │   │   ├── base.py            # Tool (ABC) + ToolRegistry
 │   │   ├── data_tools.py      # get_schema, list_tables, execute_sql, import_dataset, get_dataset, link/unlink_tables
 │   │   ├── viz_tools.py       # render_chart: exec code matplotlib → PNG
-│   │   ├── planner.py         # kế hoạch xử lý: định tuyến bằng quy tắc + validator (allowlist, schema) — hàm thuần
+│   │   ├── planner.py         # kế hoạch xử lý: validator hợp đồng JSON của LLM (steps/chart) + quy tắc dự phòng — hàm thuần
 │   │   ├── eda_tools.py       # 5 EDA tool xác định: overview, data_quality, numeric_summary, categorical_summary, correlation
 │   │   ├── eda_text.py        # câu trả lời text cho EDA (template, số liệu lấy từ payload)
 │   │   ├── intent.py          # nhận diện yêu cầu vẽ biểu đồ / xem SQL trong câu hỏi (hàm thuần)
 │   │   ├── answer_tools.py    # template_answer + answer_is_grounded (kiểm tra số liệu)
 │   │   ├── mocks.py           # mock_sql, mock_viz_code
 │   │   └── text_utils.py      # clean_code, is_valid_code, extract_sql (hàm thuần)
-│   ├── agents/                # planner_agent.py (kế hoạch), sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
+│   ├── agents/                # planner_agent.py (LLM lập kế hoạch query/EDA/chart), sql_agent.py (SQL), answer_agent.py (câu trả lời text), viz_agent.py (biểu đồ)
 │   └── pipeline/
 │       └── orchestrator.py    # PipelineOrchestrator (kế hoạch → query và/hoặc EDA → câu trả lời → biểu đồ tùy chọn) + DatasetService (cầu nối api → tools)
 ├── frontend/
@@ -101,11 +101,11 @@ Data-Analytics-System/
 
 ## 3. Luồng một request
 
-`POST /api/query` → `PipelineOrchestrator.run()` (một luồng duy nhất, không có "chế độ"). Bước 0 là **kế hoạch xử lý** (giai đoạn 4, xem mục 6c); phần dưới là bước `query`:
+`POST /api/query` → `PipelineOrchestrator.run()` (một luồng duy nhất, không có "chế độ"). Bước 0 là **kế hoạch xử lý do LLM lập** (giai đoạn 4 + 6, xem mục 6c và 6e); phần dưới là bước `query`:
 
 ```
-0. PlannerAgent.plan(question, dataset_id)  → ProcessingPlan: danh sách bước {query | EDA operation} đã xác thực
-                                            (không có từ khóa EDA → [query], không gọi LLM planner)
+0. PlannerAgent.plan(question, dataset_id)  → ProcessingPlan {steps, chart, show_sql} đã xác thực. LLM lập kế hoạch từ schema;
+                                            LLM không dùng được (mock/PLANNER_MODE=rules/lỗi) → quy tắc dự phòng (mục 6e)
 1. SQLAgent.generate(question, dataset_id)  prompt theo schema → LLM → SQL; `-- CLARIFY:` → "needs_clarification" (dừng)
                                             lỗi gọi LLM → "sql_error" (không đem câu chú thích đi chạy)
 2. tool execute_sql(sql, dataset_id)        chỉ-đọc, timeout, giới hạn dòng; lỗi → "sql_error"; 0 dòng → "empty_result"
@@ -158,7 +158,8 @@ clarification   câu hỏi làm rõ (khi needs_clarification)
 table     {columns, rows}                  bảng kết quả (bằng chứng)
 evidence  {sql, sql_source, sql_prompt, sql_error, show_sql, row_count, column_count, truncated, elapsed_ms}
 chart     {status: not_requested|ok|error, requested_by: none|option|prompt, chart_type, png_base64, error, code, prompt, source}
-plan      {source: rules|llm|rules_fallback, steps: [{operation, table, columns, params}], chart_requested, show_sql}
+plan      {source: llm|rules|rules_fallback, fallback_reason, steps: [{operation, table, columns, params, question}],
+            chart: {requested, type, goal, origin}, chart_requested, show_sql}
 eda       [{operation, table, columns, status: ok|not_applicable|error, error, summary, table_data{columns,rows}, warnings,
             definitions, exact, sampled, sample_info, truncated, queries, elapsed_ms, text}]
 ```
@@ -171,25 +172,26 @@ SQL/code/prompt nội bộ nằm trong `evidence`/`chart`, không thay thế `an
 
 Đọc từ biến môi trường hoặc file `.env` ở thư mục gốc (biến môi trường thật được ưu tiên). Giá trị mặc định = giá trị của bản cũ.
 
-| Biến                                                                | Mặc định                                      | Ý nghĩa                                                                                          |
-| -------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `LLM_PROVIDER`                                                     | `deepseek`                                     | Chọn cloud provider:`deepseek` hoặc `openai`                                                 |
-| `DEEPSEEK_API_KEY`                                                 | *(rỗng)*                                      | Dùng khi`LLM_PROVIDER=deepseek`; rỗng → SQL và câu trả lời chạy mock                     |
-| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                           | `https://api.deepseek.com` / `deepseek-chat` | DeepSeek endpoint và model                                                                        |
-| `OPENAI_API_KEY` / `OPENAI_MODEL`                                | *(rỗng)* / `gpt-5.6`                        | Dùng khi`LLM_PROVIDER=openai`; client gửi giới hạn đầu ra bằng `max_completion_tokens`  |
-| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                             | `0` / `512`                                  | Stage 1                                                                                            |
-| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`                 | `0.1` / `800`                                | Stage 3 khi dùng cloud provider                                                                   |
-| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                               | `http://127.0.0.1:11434` / `llama3.2`        |                                                                                                    |
-| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                           | `120` / `512`                                |                                                                                                    |
-| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                            | `0.1` / `0.9`                                |                                                                                                    |
-| `NL2VIZ_DB_PATH`                                                   | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                                          |
-| `NL2VIZ_DATASET_DIR`                                               | `data/datasets`                                | Nơi lưu dataset upload                                                                           |
-| `NL2VIZ_MAX_UPLOAD_MB`                                             | `50`                                           | Giới hạn kích thước tệp upload                                                               |
-| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE`            | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                                                  |
-| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`                 | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                                            |
-| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                                  | `3` / `100`                                  | Số dòng mẫu trong prompt biểu đồ / DPI ảnh                                                  |
-| `ANSWER_MAX_ROWS` / `ANSWER_MAX_TOKENS` / `ANSWER_TEMPERATURE` | `20` / `300` / `0`                         | Câu trả lời text: số dòng kết quả tối đa gửi cho LLM / giới hạn đầu ra / nhiệt độ |
-| `NL2VIZ_API_URL`                                                   | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit`                      |
+| Biến                                                                | Mặc định                                      | Ý nghĩa                                                                                                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `LLM_PROVIDER`                                                     | `deepseek`                                     | Chọn cloud provider:`deepseek` hoặc `openai`                                                                             |
+| `DEEPSEEK_API_KEY`                                                 | *(rỗng)*                                      | Dùng khi`LLM_PROVIDER=deepseek`; rỗng → SQL và câu trả lời chạy mock                                                 |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`                           | `https://api.deepseek.com` / `deepseek-chat` | DeepSeek endpoint và model                                                                                                    |
+| `OPENAI_API_KEY` / `OPENAI_MODEL`                                | *(rỗng)* / `gpt-5.6`                        | Dùng khi`LLM_PROVIDER=openai`; client gửi giới hạn đầu ra bằng `max_completion_tokens`                              |
+| `SQL_TEMPERATURE` / `SQL_MAX_TOKENS`                             | `0` / `512`                                  | Stage 1                                                                                                                        |
+| `VIZ_CLOUD_TEMPERATURE` / `VIZ_CLOUD_MAX_TOKENS`                 | `0.1` / `800`                                | Stage 3 khi dùng cloud provider                                                                                               |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL`                               | `http://127.0.0.1:11434` / `llama3.2`        |                                                                                                                                |
+| `OLLAMA_TIMEOUT` / `OLLAMA_MAX_TOKENS`                           | `120` / `512`                                |                                                                                                                                |
+| `OLLAMA_TEMPERATURE` / `OLLAMA_TOP_P`                            | `0.1` / `0.9`                                |                                                                                                                                |
+| `NL2VIZ_DB_PATH`                                                   | `demo_db/sales_demo.db`                        | Demo DB (dataset mặc định, chỉ đọc)                                                                                      |
+| `NL2VIZ_DATASET_DIR`                                               | `data/datasets`                                | Nơi lưu dataset upload                                                                                                       |
+| `NL2VIZ_MAX_UPLOAD_MB`                                             | `50`                                           | Giới hạn kích thước tệp upload                                                                                           |
+| `NL2VIZ_IMPORT_TIMEOUT` / `NL2VIZ_MAX_ROWS_PER_TABLE`            | `60` / `200000`                              | Thời gian import / số dòng tối đa mỗi bảng                                                                              |
+| `NL2VIZ_QUERY_TIMEOUT` / `NL2VIZ_QUERY_MAX_ROWS`                 | `10` / `1000`                                | Thời gian thực thi SQL / số dòng kết quả tối đa                                                                        |
+| `VIZ_SAMPLE_ROWS` / `CHART_DPI`                                  | `3` / `100`                                  | Số dòng mẫu trong prompt biểu đồ / DPI ảnh                                                                              |
+| `ANSWER_MAX_ROWS` / `ANSWER_MAX_TOKENS` / `ANSWER_TEMPERATURE` | `20` / `300` / `0`                         | Câu trả lời text: số dòng kết quả tối đa gửi cho LLM / giới hạn đầu ra / nhiệt độ                             |
+| `PLANNER_MODE` / `PLANNER_MAX_TOKENS`                            | `llm` / `700`                                | Planner: `llm` = LLM lập kế hoạch (mặc định); `rules` = chỉ quy tắc, không gọi LLM planner / giới hạn đầu ra |
+| `NL2VIZ_API_URL`                                                   | `http://127.0.0.1:8000`                        | **Frontend** — đọc từ môi trường của tiến trình `streamlit`                                                  |
 
 Dùng model Ollama tùy chỉnh: `ollama create llama3-fast -f scripts/Modelfile_llama3`, rồi đặt `OLLAMA_MODEL=llama3-fast`.
 
@@ -256,6 +258,8 @@ SQLite vẫn là định dạng lưu trữ chuẩn. EDA **không** phải chatbo
 
 **Kế hoạch xử lý** (`tools/planner.py`, `agents/planner_agent.py`): `ProcessingPlan` = danh sách bước `{operation, table, columns, params}` + yêu cầu biểu đồ + yêu cầu hiển thị SQL.
 
+> **Từ giai đoạn 6, LLM là bộ quyết định chính** (mục 6e). Bảng định tuyến bằng quy tắc dưới đây là **phương án dự phòng** khi không dùng được LLM planner (mock, `PLANNER_MODE=rules`, chưa cấu hình LLM, LLM lỗi).
+
 | Tình huống                                                                                                                                                                                                                  | Cách định tuyến                                                                                                     |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Không có từ khóa EDA (“doanh thu theo vùng”, “top 5 sản phẩm”)                                                                                                                                                     | `[query]` bằng quy tắc; **không** gọi LLM planner, **không** chạy EDA                               |
@@ -313,6 +317,48 @@ Biểu đồ vẫn là bước phụ của cùng lượt chat (không có luồn
 
 ---
 
+## 6e. Planner Agent do LLM lập kế hoạch (giai đoạn 6)
+
+LLM lập **một kế hoạch thống nhất** cho mỗi câu hỏi; regex không còn là cơ chế quyết định chính. Ranh giới trách nhiệm:
+
+| Thành phần                         | Việc làm                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **Planner** (`PlannerAgent`) | quyết định *cần làm gì*: bước nào, bảng/cột nào, có vẽ biểu đồ không, hay cần hỏi lại |
+| **SQL Agent**                  | sinh SQL cho bước `query` (nhận câu hỏi con của Planner)                                             |
+| **EDA tools**                  | tính toán xác định (overview, chất lượng, thống kê, tần suất, tương quan)                      |
+| **Viz**                        | `VIZ_MODE=code`: Viz Agent sinh mã vẽ · `VIZ_MODE=spec`: chart tools dựng/render spec                |
+
+**Hợp đồng JSON** LLM phải trả (chỉ nhận **schema**: tên bảng/cột/kiểu, không gửi dữ liệu; danh sách operation và loại chart nằm trong prompt):
+
+```json
+{"steps": [{"op": "query|table_overview|data_quality|numeric_summary|categorical_summary|correlation",
+            "question": "câu hỏi con", "table": "...", "columns": ["..."], "params": {}}],
+ "chart": {"requested": false, "type": null, "goal": null},
+ "clarification": null}
+```
+
+- `steps`: tối đa **một** bước `query` và/hoặc các operation EDA; tối đa 6 bước; `params`: `top_k` ∈ [1, 50], `method` ∈ {pearson, spearman}.
+- `chart.requested`: người dùng có yêu cầu vẽ không (không tự ý vẽ). `type` ∈ {bar chart, line chart, pie chart, scatter plot, histogram, kde plot, box plot, violin plot, heatmap, count plot} (nhận cả cách gọi ngắn như `bar`, `pie`) hoặc `null`; `goal` ∈ {comparison, trend, distribution, relationship, composition} hoặc `null`. `null` = để hệ thống chọn loại phù hợp khi đã có dữ liệu (mục 6d).
+- `clarification`: câu hỏi làm rõ khi thiếu thông tin/mơ hồ (cùng ngôn ngữ người dùng).
+
+**Kiểm tra trước khi chạy** (`validate_llm_plan`): JSON hợp lệ; operation ∈ allowlist; số bước/số bước `query`; tên bảng/cột có trong schema (chuẩn hóa hoa/thường); tham số; `chart.requested` là boolean, `type`/`goal` ∈ allowlist. **Bất kỳ phần nào sai → `needs_clarification`, không chạy một phần kế hoạch** (không SQL, không EDA, không biểu đồ).
+
+**Ưu tiên tùy chọn phụ:** `chart_hint=none` luôn không vẽ; một loại cụ thể thắng `chart.type` của LLM; `auto` luôn vẽ (loại/mục tiêu theo LLM, `null` = tự chọn); `detect` vẽ khi LLM xác định có yêu cầu. `show_sql` = tùy chọn hoặc câu hỏi nhắc tới SQL.
+
+**Khi LLM planner không dùng được** → bản nháp bằng quy tắc (vẫn qua `validate_plan`), ghi rõ trong `plan.source` / `plan.fallback_reason`:
+
+| `source`         | `fallback_reason`    | Khi nào                                      |
+| ------------------ | ---------------------- | --------------------------------------------- |
+| `llm`            | —                     | LLM lập kế hoạch                           |
+| `rules`          | `mock`               | `use_mock_sql=true` (không gọi cloud LLM) |
+| `rules`          | `planner_mode_rules` | `PLANNER_MODE=rules`                        |
+| `rules`          | `llm_unavailable`    | chưa cấu hình LLM (không có API key)     |
+| `rules_fallback` | `llm_error: ...`     | gọi LLM lỗi (mạng/hết hạn mức)          |
+
+**Biểu đồ không khả thi** (chế độ `code` mà kế hoạch chỉ có EDA; loại chart không hợp với dữ liệu; overview không có số liệu để vẽ) → `chart.status="error"` kèm lý do; câu trả lời, bảng query và kết quả EDA vẫn trả về. Mỗi câu hỏi tốn thêm một lời gọi LLM ngắn cho Planner; đặt `PLANNER_MODE=rules` nếu muốn tiết kiệm (đổi lại quy tắc nhận diện hạn chế hơn).
+
+---
+
 ## 7. Cách mở rộng
 
 - **Thêm tool:** tạo class kế thừa `Tool` trong `backend/tools/` (đặt `name`, `description`, cài `run`), đăng ký trong `container.build_container`, rồi agent/pipeline gọi `tools.get("tên").run(...)`.
@@ -320,11 +366,13 @@ Biểu đồ vẫn là bước phụ của cùng lượt chat (không có luồn
 - **Thêm LLM provider:** kế thừa `LLMClient` (`is_available`, `complete`) trong `backend/llm/`, tiêm vào `build_container`. Agents không cần sửa.
 - **Đổi loại database:** viết repository mới có cùng các phương thức (`exists`, `get_schema`, `get_schema_dict`, `execute`) và cho `DatasetStore.repository()` trả về nó.
 - **Thêm endpoint:** thêm schema vào `api/schemas.py` và route vào `api/routes.py`; route chỉ gọi `Container` (orchestrator / dataset_service).
-- **Test với LLM giả:** `build_container(settings, deepseek=FakeLLM(...), ollama=FakeLLM(...))` — xem `tests/conftest.py`.
+- **Test với LLM giả:** `build_container(settings, deepseek=FakeLLM(...), ollama=FakeLLM(...))` — xem `tests/conftest.py`. `FakeLLM` tách lời gọi của Planner (`planner_calls`, `planner_response`; mặc định trả kế hoạch một bước `query`) khỏi lời gọi SQL/answer (`calls`, `response`, `.script(...)`).
 
 ---
 
 **Giai đoạn 5 đổi hành vi mặc định:** biểu đồ vẽ bằng bộ vẽ xác định (`VIZ_MODE=spec`) thay vì code do LLM sinh; `/api/health` có thêm `viz_mode`; `chart.code/prompt` rỗng ở chế độ này và có thêm `chart.meta`; từ “cột” đứng một mình không còn được hiểu là biểu đồ cột (chỉ “biểu đồ cột”, “bar”...), “histogram” giờ là loại riêng. Đặt `VIZ_MODE=code` để dùng lại đường cũ.
+
+**Giai đoạn 6 đổi hành vi mặc định:** khi có LLM, mỗi câu hỏi tốn thêm một lời gọi Planner; câu hỏi có từ khóa EDA không còn được định tuyến cứng bằng regex; kế hoạch LLM sai schema → hỏi lại thay vì đoán; `plan` trong `/api/query` có thêm `chart{requested,type,goal,origin}`, `fallback_reason` và `steps[].question`; `PLANNER_MODE=rules` trả về hành vi cũ.
 
 ## 8. Khác biệt so với bản cũ
 

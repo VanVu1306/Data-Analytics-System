@@ -123,21 +123,40 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 
 ## Giai đoạn 6 — Agent hóa Planner: lập kế hoạch query/EDA/chart bằng LLM
 
-- [ ] Mở rộng Planner Agent để LLM lập một kế hoạch thống nhất cho câu hỏi, thay vì dùng regex làm cơ chế quyết định chính cho query, EDA, câu hỏi kết hợp và yêu cầu biểu đồ.
-- [ ] Thiết kế hợp đồng kế hoạch JSON có cấu trúc, gồm:
+- [X] Mở rộng Planner Agent để LLM lập một kế hoạch thống nhất cho câu hỏi, thay vì dùng regex làm cơ chế quyết định chính cho query, EDA, câu hỏi kết hợp và yêu cầu biểu đồ.
+- [X] Thiết kế hợp đồng kế hoạch JSON có cấu trúc, gồm:
 
-  - [ ] `steps`: một bước `query` tối đa và/hoặc các operation EDA được hỗ trợ, kèm câu hỏi con, bảng, cột và tham số cần thiết.
-  - [ ] `chart`: `requested`, loại biểu đồ và mục tiêu trực quan; cho phép loại/mục tiêu chưa xác định để hệ thống chọn phù hợp khi có dữ liệu.
-  - [ ] `clarification`: câu hỏi làm rõ nếu yêu cầu thiếu thông tin hoặc mơ hồ.
-- [ ] Cung cấp cho LLM schema của dataset và danh sách operation/chart được hỗ trợ; không gửi dữ liệu bảng nếu không cần thiết để lập kế hoạch.
-- [ ] Kiểm tra phản hồi LLM (JSON, operation, số bước, tên bảng/cột, tham số, chart type) bằng schema/allowlist trước khi chuyển Orchestrator thực thi; kế hoạch không hợp lệ hoặc mơ hồ thì yêu cầu làm rõ, không chạy một phần kế hoạch sai.
-- [ ] Giữ ranh giới trách nhiệm: Planner quyết định cần làm gì; SQL Agent sinh SQL; EDA tools tính toán; Viz Agent sinh mã vẽ trong `VIZ_MODE=code` hoặc chart tools dựng/render spec trong `VIZ_MODE=spec`.
-- [ ] Bảo toàn ràng buộc chế độ vẽ hiện tại, nếu kế hoạch yêu cầu chart nhưng không khả thi, trả trạng thái/lý do rõ ràng mà không làm mất câu trả lời và kết quả phân tích.
-- [ ] Kiểm thử query thường, EDA, kết hợp query + EDA, yêu cầu/không yêu cầu chart, loại chart cụ thể, `chart_hint` ưu tiên, yêu cầu mơ hồ, phản hồi LLM sai schema và lỗi/không khả dụng của LLM.
+  - [X] `steps`: một bước `query` tối đa và/hoặc các operation EDA được hỗ trợ, kèm câu hỏi con, bảng, cột và tham số cần thiết.
+  - [X] `chart`: `requested`, loại biểu đồ và mục tiêu trực quan; cho phép loại/mục tiêu chưa xác định để hệ thống chọn phù hợp khi có dữ liệu.
+  - [X] `clarification`: câu hỏi làm rõ nếu yêu cầu thiếu thông tin hoặc mơ hồ.
+- [X] Cung cấp cho LLM schema của dataset và danh sách operation/chart được hỗ trợ; không gửi dữ liệu bảng nếu không cần thiết để lập kế hoạch.
+- [X] Kiểm tra phản hồi LLM (JSON, operation, số bước, tên bảng/cột, tham số, chart type) bằng schema/allowlist trước khi chuyển Orchestrator thực thi; kế hoạch không hợp lệ hoặc mơ hồ thì yêu cầu làm rõ, không chạy một phần kế hoạch sai.
+- [X] Giữ ranh giới trách nhiệm: Planner quyết định cần làm gì; SQL Agent sinh SQL; EDA tools tính toán; Viz Agent sinh mã vẽ trong `VIZ_MODE=code` hoặc chart tools dựng/render spec trong `VIZ_MODE=spec`.
+- [X] Bảo toàn ràng buộc chế độ vẽ hiện tại, nếu kế hoạch yêu cầu chart nhưng không khả thi, trả trạng thái/lý do rõ ràng mà không làm mất câu trả lời và kết quả phân tích.
+- [X] Kiểm thử query thường, EDA, kết hợp query + EDA, yêu cầu/không yêu cầu chart, loại chart cụ thể, `chart_hint` ưu tiên, yêu cầu mơ hồ, phản hồi LLM sai schema và lỗi/không khả dụng của LLM.
 
 **Thành phần dự kiến:** `backend/agents/planner_agent.py`, `backend/prompts/planner_prompts.py`, `backend/tools/planner.py`, `backend/tools/intent.py`, `backend/pipeline/orchestrator.py`, API plan schema/response và các kiểm thử Planner/pipeline liên quan.
 
-## Giai đoạn 7 — Quản lý dataset và quan hệ
+## Giai đoạn 7 — Dùng chung Answer Agent cho query/EDA và tinh gọn tools
+
+- [ ] Mở rộng hợp đồng `AnswerAgent` để nhận câu hỏi cùng bằng chứng có cấu trúc từ một hoặc cả hai nguồn:
+
+  - [ ] Kết quả query: dữ liệu bảng đã giới hạn, trạng thái truncation và thông tin cần thiết để diễn giải.
+  - [ ] Kết quả EDA: các `EdaPayload` theo thứ tự kế hoạch, gồm operation, bảng/cột, summary, dữ liệu kết quả và trạng thái/cảnh báo.
+  - [ ] Cho phép query-only, EDA-only và query + EDA; không yêu cầu nhánh không chạy phải tạo dữ liệu giả.
+- [ ] Điều chỉnh `PipelineOrchestrator` để tổng hợp câu trả lời sau khi đã thu thập xong mọi kết quả trong kế hoạch; không tự ý tạo câu trả lời cho nhánh nào không trả về bằng chứng.
+- [ ] Giữ bảng query, SQL/bằng chứng và kết quả biểu đồ là các trường/phần hiển thị riêng; câu trả lời ngắn chỉ diễn giải bằng chứng đã có.
+- [ ] Cập nhật prompt và kiểm tra grounding để câu trả lời chỉ dùng số liệu trong query/EDA payload; không để LLM tự tính phép phân tích hoặc suy luận vượt quá bằng chứng.
+- [ ] Đưa trạng thái sampled, truncated, lỗi hoặc không áp dụng được vào context câu trả lời; không trình bày số liệu ước lượng như kết quả đầy đủ và không che giấu lỗi một operation khi operation khác thành công.
+- [ ] Duy trì template xác định làm fallback khi LLM không khả dụng, trả lời rỗng, lỗi hoặc không bám bằng chứng; ghi nhận nguồn câu trả lời và lý do fallback nhất quán cho cả hai nhánh.
+- [ ] Kiểm kê tools/utilities theo trách nhiệm, nơi đăng ký, callers và exports trước khi thay đổi; xác định rõ thành phần nào là tool thực thi, template fallback hay hàm tiện ích thuần.
+- [ ] Tích hợp hoặc loại bỏ phần trùng lặp/chưa dùng chỉ khi hợp đồng và hành vi tương đương đã được xác nhận. Đặc biệt rà soát `EdaAnswerTool`/`summarize_payload`, template answer dùng cho query, các helper ngôn ngữ và exports/đăng ký trong `backend/tools/__init__.py` cùng `backend/container.py`.
+- [ ] Kiểm thử câu trả lời query-only, EDA-only, query + EDA; dữ liệu rỗng; một phần EDA lỗi; kết quả sampled/truncated; LLM lỗi/rỗng/không grounded; và bảo đảm bảng, SQL, chart cùng trạng thái API hiện tại không bị mất hoặc thay đổi ngoài ý muốn.
+- [ ] Cập nhật tài liệu kiến trúc/cách hoạt động để mô tả Answer Agent chung, fallback và ranh giới giữa agent tổng hợp với tools tính toán.
+
+**Thành phần dự kiến:** `backend/agents/answer_agent.py`, `backend/prompts/answer_prompts.py`, `backend/tools/answer_tools.py`, `backend/tools/eda_text.py`, `backend/tools/text_utils.py`, `backend/tools/__init__.py`, `backend/container.py`, `backend/pipeline/orchestrator.py` và các kiểm thử agent/pipeline/API liên quan.
+
+## Giai đoạn 8 — Quản lý dataset và quan hệ
 
 - [ ] Thêm API xem danh sách dataset nếu chính sách lưu trữ cho phép.
 - [ ] Thêm API xem schema/preview dữ liệu của dataset, giới hạn số dòng trả về.
@@ -147,7 +166,7 @@ Cho phép người dùng upload dữ liệu ngay trên UI, chuẩn hóa dữ li�
 - [ ] Nếu chưa có tài khoản người dùng, xác định rõ dataset thuộc phiên nào và cách cô lập giữa các phiên; nếu có đăng nhập, kiểm tra quyền sở hữu ở mọi endpoint.
 - [ ] Kiểm thử truy cập chéo dataset/phiên bị từ chối và thao tác xóa không ảnh hưởng dataset khác.
 
-## Giai đoạn 8 — Hoàn thiện, an toàn và tài liệu
+## Giai đoạn 9 — Hoàn thiện, an toàn và tài liệu
 
 - [ ] Không tin cậy tên tệp, MIME type, `dataset_id` hoặc đường dẫn do client gửi.
 - [ ] Đặt giới hạn upload/import/truy vấn; không thực thi `.sql` script tùy ý trên môi trường ứng dụng.

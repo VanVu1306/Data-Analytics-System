@@ -1,6 +1,7 @@
 """Fixtures dùng chung: DB demo tạm, LLM giả, container giả."""
 import dataclasses
 import importlib.util
+import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -9,27 +10,67 @@ import pytest
 from backend.config import load_settings
 from backend.container import build_container
 from backend.llm import LLMClient
+from backend.tools import resolve_chart_plan
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-class FakeLLM(LLMClient):
-    """LLM giả: ghi lại các lần gọi, trả về response cố định hoặc raise lỗi."""
+def _is_planner_call(system) -> bool:
+    return bool(system) and system.startswith("You are the planner")
 
-    def __init__(self, name="fake", available=True, response="", raises: Optional[Exception] = None):
+
+def _default_plan(prompt: str) -> str:
+    """Kế hoạch của một "LLM planner ngoan": một bước query, vẽ biểu đồ khi câu hỏi yêu cầu (nhận biết bằng intent)."""
+    question = prompt.split("Question: ", 1)[-1].rsplit("\n\nJSON plan:", 1)[0]
+    chart = resolve_chart_plan(question, "detect")
+    return json.dumps({
+        "steps": [{"op": "query"}],
+        "chart": {"requested": chart.requested, "type": chart.chart_type, "goal": chart.goal},
+        "clarification": None,
+    })
+
+
+class FakeLLM(LLMClient):
+    """LLM giả: ghi lại các lần gọi, trả về response cố định hoặc raise lỗi.
+
+    Lời gọi của Planner (system prompt "You are the planner...") được tách riêng: ghi vào `planner_calls` (không vào
+    `calls`, nên các test đếm lời gọi SQL/answer/viz không bị ảnh hưởng) và trả `planner_response`; nếu không đặt thì
+    trả kế hoạch mặc định "một bước query" (+ biểu đồ khi câu hỏi yêu cầu).
+    """
+
+    def __init__(self, name="fake", available=True, response="", raises: Optional[Exception] = None,
+                 planner_response: Optional[str] = None, planner_raises: Optional[Exception] = None):
         self.name = name
         self.available = available
         self.response = response
         self.raises = raises
+        self.planner_response = planner_response
+        self.planner_raises = planner_raises
         self.calls: List[dict] = []
+        self.planner_calls: List[dict] = []
+        self._script = None
+
+    def script(self, *responses):
+        """Các lời gọi KHÔNG phải planner lần lượt trả từng phần tử (Exception thì raise)."""
+        self._script = iter(responses)
+        return self
 
     def is_available(self) -> bool:
         return self.available
 
     def complete(self, prompt, *, system=None, model=None, temperature=None, max_tokens=None):
-        self.calls.append(
-            dict(prompt=prompt, system=system, model=model, temperature=temperature, max_tokens=max_tokens)
-        )
+        call = dict(prompt=prompt, system=system, model=model, temperature=temperature, max_tokens=max_tokens)
+        if _is_planner_call(system):
+            self.planner_calls.append(call)
+            if self.planner_raises or self.raises:
+                raise self.planner_raises or self.raises
+            return self.planner_response if self.planner_response is not None else _default_plan(prompt)
+        self.calls.append(call)
+        if self._script is not None:
+            item = next(self._script)
+            if isinstance(item, Exception):
+                raise item
+            return item
         if self.raises:
             raise self.raises
         return self.response

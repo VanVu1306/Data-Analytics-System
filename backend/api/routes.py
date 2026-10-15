@@ -23,6 +23,7 @@ from backend.api.schemas import (
     Evidence,
     HealthResponse,
     ModelsResponse,
+    PlanChartInfo,
     PlanInfo,
     PlanStepInfo,
     QueryRequest,
@@ -126,8 +127,15 @@ def _to_response(result: PipelineResult) -> QueryResponse:
         plan = PlanInfo(
             source=result.plan.source,
             steps=[PlanStepInfo(**s.to_dict()) for s in result.plan.steps],
+            chart=PlanChartInfo(
+                requested=result.plan.chart.requested,
+                type=result.plan.chart.chart_type,
+                goal=result.plan.chart.goal,
+                origin=result.plan.chart.origin,
+            ),
             chart_requested=result.plan.chart.requested,
             show_sql=result.plan.show_sql,
+            fallback_reason=result.plan.fallback_reason,
         )
     return QueryResponse(
         status=result.status.value,
